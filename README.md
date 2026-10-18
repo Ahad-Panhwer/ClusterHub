@@ -284,6 +284,6 @@ Once deployment is complete, add the actual live application URL to this README.
 
 **One platform. Better organized tournaments.**
 
-Built as a Web Engineering project.
+
 
 </div>
