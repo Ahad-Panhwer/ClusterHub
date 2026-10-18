@@ -1,0 +1,6 @@
+{
+  "name": "ClusterHub",
+  "description": "Gaming Tournament & Match Management System. Play Together. Compete Better.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
