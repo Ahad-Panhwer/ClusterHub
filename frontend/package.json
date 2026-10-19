@@ -1,10 +1,11 @@
 {
-  "name": "react-example",
+  "name": "clusterhub-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "vite --port 5173",
+    "server": "tsx server.ts",
     "start": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",

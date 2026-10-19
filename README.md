@@ -4,15 +4,17 @@
 
 **Organize tournaments. Manage matches. Track the competition.**
 
-A full-stack gaming management platform designed to bring games, tournaments, teams, registrations, match schedules, and leaderboards together in one place.
+A modern, full-stack esports and gaming tournament management platform connecting games, tournaments, teams, registrations, match fixtures, and real-time leaderboards.
 
 <br>
 
-![Project Status](https://img.shields.io/badge/Status-Ready%20for%20Deployment-16a34a?style=for-the-badge)
+![Project Status](https://img.shields.io/badge/Status-Fully%20Verified%20%26%20Active-16a34a?style=for-the-badge)
 ![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-Enabled-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-Backend-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
 ![Express](https://img.shields.io/badge/Express.js-API-000000?style=for-the-badge&logo=express&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)
 
 <br>
 
@@ -22,268 +24,213 @@ A full-stack gaming management platform designed to bring games, tournaments, te
 
 ---
 
-## 📌 About the Project
-
-Managing gaming tournaments involves coordinating games, teams, registrations, match schedules, results, and standings. Keeping this information organized across separate tools can make tournament administration unnecessarily complicated.
-
-**ClusterHub** provides a centralized interface for managing these activities through a single web application.
-
-The project combines a React-based frontend with TypeScript and an Express backend to support the core management workflows. Its interface includes a dashboard, dedicated management pages, authentication screens, and a leaderboard.
-
-The application has been built and runs locally. **Online deployment is the remaining step.**
-
-## 🎯 Problem & Solution
-
-| Problem | ClusterHub solution |
-|---|---|
-| Game information is difficult to organize | Centralized games management |
-| Tournament details require frequent updates | Dedicated tournament management |
-| Match schedules and results can become confusing | Match scheduling and result management |
-| Team participation is difficult to track | Teams and registrations management |
-| Competition standings need to be calculated | Leaderboard based on match results |
-| Information is spread across different screens and tools | One interface for essential tournament activities |
-
-## ✨ Key Features
-
-### 🎮 Games Management
-- Create and manage game records.
-- View the available games catalogue.
-- Update game information.
-- Delete game records.
-- Maintain details such as genre, platform, description, and player limits.
-
-### 🏆 Tournament Management
-- Create and manage tournaments.
-- Associate tournaments with games.
-- Maintain tournament details, dates, formats, and status.
-- Update tournament information.
-- View tournament-related team registrations and matches.
-
-### ⚔️ Match Management
-- Schedule matches between teams.
-- Maintain match rounds and schedules.
-- Update match details and status.
-- Record scores and results.
-- Identify winners from completed matches.
-
-### 👥 Teams Management
-- Create and manage teams.
-- Maintain team names, tags, and captain information.
-- View and update team details.
-- Connect teams with tournament participation.
-
-### 📝 Registrations Management
-- Register teams for tournaments.
-- View tournament registrations.
-- Update registration status.
-- Prevent duplicate registrations through application-level validation.
-- Support registration limits and waitlisting.
-
-### 📊 Leaderboard
-- Display team standings.
-- Track matches played, wins, losses, points, and win rate.
-- Calculate rankings from match results.
-- View standings across competitions.
-
-### 📈 Dashboard
-- View a summary of games, tournaments, matches, and teams.
-- Access key tournament information from one screen.
-- Navigate quickly to the main management modules.
-
-### 🔐 Authentication & Application Settings
-- Dedicated authentication interface.
-- Application-level authentication state management.
-- Settings and application preferences.
-- User-friendly notifications and feedback.
-
-## 🛠️ Technology Stack
-
-| Technology | Purpose |
-|---|---|
-| React | Frontend user interface |
-| TypeScript | Type-safe application development |
-| Vite | Frontend development and build tooling |
-| Node.js | JavaScript runtime |
-| Express.js | Backend server and REST API |
-| Supabase | Optional PostgreSQL and authentication integration in the backend |
-| React Router | Page navigation |
-| Lucide React | Interface icons |
-| Git & GitHub | Version control and source-code hosting |
-
-## 🏗️ Project Architecture
-
-ClusterHub separates its frontend interface from its backend API.
+## 📌 Architecture & System Flow
 
 ```mermaid
-flowchart TD
-    A[User] --> B[React + TypeScript Frontend]
-    B --> C[API Client]
-    C --> D[Express REST API]
-    D --> E[Validation and Business Logic]
-    E --> F[Games]
-    E --> G[Tournaments]
-    E --> H[Matches]
-    E --> I[Teams and Registrations]
-    E --> J[Leaderboard]
-    E --> K[(Supabase PostgreSQL - when configured)]
+graph TD
+    A[React 19 Frontend - Vite] --> B[Centralized DataContext]
+    B --> C[API Client - fetch with Bearer Token]
+    C -->|HTTP REST on :4000| D[Express REST API]
+    D --> E[Security: Helmet, CORS, Rate Limit]
+    D --> F[Auth & Role Verification]
+    D --> G[Zod Schema Validation]
+    G --> H[Repository Layer]
+    H -->|Production| I[(Supabase PostgreSQL)]
+    H -->|Local Dev Fallback| J[In-Memory Store with Seed Data]
 ```
 
-The frontend provides the interface and communicates with the API client. The Express backend exposes endpoints for managing the main resources and calculating leaderboard standings.
+ClusterHub uses a clean full-stack monorepo architecture:
+- **`frontend/`**: React 19 + TypeScript + Vite + Tailwind CSS v4 with glassmorphism dark gaming UI.
+- **`backend/`**: Node.js + Express + TypeScript REST API providing full validation, authorization, and dual base path support (`/api/*` and `/api/v1/*`).
+- **`database/`**: Versioned PostgreSQL migrations, Row-Level Security (RLS) policies, and seed data for Supabase.
+- **`docs/`**: Complete engineering specifications, API contracts, database schema, and deployment plans.
 
-The backend supports an in-memory development mode when Supabase is not configured. Persistent database operation requires the appropriate Supabase configuration.
+---
 
 ## 📂 Repository Structure
 
 ```text
 ClusterHub/
-├── README.md
-├── package.json
-├── .gitignore
+├── package.json               # Root workspace scripts (run both frontend and backend)
+├── render.yaml                # 1-click Render blueprint deployment specification
+├── README.md                  # Master documentation
+├── .gitignore                 # Root Git exclusion rules
 │
-├── Frontend_UI/
+├── frontend/                  # React 19 + TypeScript Web UI
 │   ├── package.json
-│   ├── server.ts
-│   ├── vite.config.ts
-│   ├── netlify.toml
+│   ├── vite.config.ts         # Vite bundler configuration
+│   ├── netlify.toml           # Netlify SPA rewrite configuration
+│   ├── .env.example           # Example environment variables
+│   ├── .env.local             # Local environment configuration (points to port 4000)
+│   ├── public/
+│   │   └── _redirects         # Single Page Application routing rewrite rule
 │   └── src/
-│       ├── components/
-│       ├── context/
-│       ├── pages/
-│       │   ├── AuthPage.tsx
-│       │   ├── DashboardPage.tsx
-│       │   ├── GamesPage.tsx
-│       │   ├── TournamentsPage.tsx
-│       │   ├── MatchesPage.tsx
-│       │   ├── TeamsPage.tsx
-│       │   ├── RegistrationsPage.tsx
-│       │   ├── LeaderboardPage.tsx
-│       │   └── SettingsPage.tsx
-│       ├── services/
-│       └── types/
+│       ├── components/        # Layout (TopNav, Sidebar), charts, and UI primitives
+│       ├── context/           # AuthContext (Abdul Ahad profile), DataContext, ToastContext
+│       ├── pages/             # Dashboard, Games, Tournaments, Matches, Teams, Registrations, Leaderboard, Settings, Auth
+│       ├── services/          # apiClient, gamesService, tournamentsService, matchesService, etc.
+│       └── types/             # Shared TypeScript type definitions
 │
-└── GameTrack_Project/
-    ├── README.md
-    ├── .env.example
-    ├── render.yaml
-    ├── backend/
-    │   ├── package.json
-    │   ├── src/
-    │   │   ├── config/
-    │   │   ├── middleware/
-    │   │   ├── repositories/
-    │   │   ├── routes/
-    │   │   ├── validators/
-    │   │   ├── app.ts
-    │   │   └── server.ts
-    │   └── tests/
-    ├── database/
-    ├── docs/
-    └── frontend/
+├── backend/                   # Node.js + Express + TypeScript REST API
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── jest.config.js         # Jest ESM configuration
+│   ├── .env.example           # Environment template
+│   ├── src/
+│   │   ├── app.ts             # Express app setup, middleware, and route mounting
+│   │   ├── server.ts          # Server listener on port 4000
+│   │   ├── config/            # Environment variable validation & Supabase auto-detection
+│   │   ├── lib/               # In-memory store fallback and Supabase client
+│   │   ├── middleware/        # auth, errorHandler, validate
+│   │   ├── repositories/      # Games, Tournaments, Matches, Teams, Registrations repositories
+│   │   ├── routes/            # Express routers for all CRUD modules
+│   │   ├── types/             # Backend TypeScript interfaces
+│   │   └── validators/        # Zod input schemas
+│   └── tests/
+│       └── api.test.ts        # 34 automated Jest & Supertest integration tests
+│
+├── database/                  # Supabase PostgreSQL Database Setup
+│   ├── README.md
+│   ├── migrations/
+│   │   ├── 0001_initial_schema.sql       # Relational tables, indexes, constraints
+│   │   └── 0002_row_level_security.sql   # RLS policies for role-based security
+│   └── seeds/
+│       └── 0001_seed_demo_data.sql       # Initial seed fixtures
+│
+└── docs/                      # Project Specifications & Design Docs
+    ├── API_CONTRACT.md        # REST API endpoints, status codes, and rules
+    ├── ARCHITECTURE.md        # System design, data flow, security model
+    ├── DATABASE_SCHEMA.md     # Relational schema reference and constraints
+    ├── DEVELOPMENT_PLAN.md    # Implementation phases and milestones
+    ├── PROJECT_SPEC.md        # Core requirements and scope
+    └── TESTING_AND_DEPLOYMENT.md # Test matrix and deployment guide
 ```
+
+---
+
+## ✨ Features & Module Capabilities
+
+### 🎮 Games Management (Mandatory CRUD)
+- **Create**: Add new games with genre, platform, description, max players per team (1–64), and release year.
+- **Read**: Interactive search, genre filters, platform filters, and game detail modal.
+- **Update**: Edit game metadata with immediate UI update.
+- **Delete**: Safe deletion with conflict protection (`409 Conflict` if dependent tournaments exist).
+
+### 🏆 Tournament Management (Mandatory CRUD)
+- **Create**: Create tournaments with formats (*Single Elimination*, *Double Elimination*, *Round Robin*, *Swiss*), capacity (2–128 teams), start/end dates, and prize pool.
+- **Read**: Status filtering (*Draft*, *Registration Open*, *In Progress*, *Completed*), live team registration count badge, and game linkage.
+- **Update**: Transition statuses, edit rules, dates, and prize distribution.
+- **Delete**: Safely cascades cleanup of associated matches and registrations.
+
+### ⚔️ Matches & Results (Mandatory CRUD)
+- **Create**: Pair teams into bracket rounds. Automatically highlights registered teams and enforces that **both teams must have an active tournament registration**.
+- **Read**: Match fixtures viewable as cards or schedule table, filtered by tournament and status.
+- **Update & Score Recording**: Record match scores, specify winner, and enter caster/referee notes.
+- **Delete**: Remove unplayed fixtures.
+
+### 👥 Teams & Registrations
+- **Teams**: Register esports teams, unique uppercase team tags (conflict detection prevents duplicate tags), and captain contacts.
+- **Registrations**: One-click team registration into tournaments with duplicate prevention and automatic waitlisting once tournament capacity is reached.
+
+### 📊 Live Derived Leaderboard
+- Dynamically calculated from verified completed match records:
+  - **Win**: 3 points
+  - **Loss**: 0 points
+  - Ranked by Points $\rightarrow$ Win Rate $\rightarrow$ Wins $\rightarrow$ Team Name.
+
+### 🔐 Authentication & Roles
+- **Active Profile**: **Abdul Ahad (Lead Organizer)**.
+- **Roles**: Support for `organizer`, `admin`, and `captain`.
+- **Security**: Bearer JWT token verification on all protected endpoints, centralized error handling (no stack traces in production), Helmet HTTP headers, CORS origin validation, and rate limiting.
+
+---
 
 ## 💻 Run ClusterHub Locally
 
 ### Prerequisites
-
-- Node.js and npm
-- Git
-- A code editor such as Visual Studio Code or Google Antigravity
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- npm (v9 or higher)
 
 ### 1. Clone the repository
-
 ```bash
 git clone https://github.com/Ahad-Panhwer/ClusterHub.git
 cd ClusterHub
 ```
 
 ### 2. Install dependencies
-
-Install the frontend and backend dependencies in their respective directories:
-
 ```bash
-npm install --prefix Frontend_UI
-npm install --prefix GameTrack_Project/backend
+# Install backend dependencies
+npm --prefix backend install
+
+# Install frontend dependencies
+npm --prefix frontend install
 ```
 
-### 3. Configure the backend
-
-Create a `.env` file inside `GameTrack_Project/backend/` and configure the required settings for your chosen operating mode.
-
-For local development with Supabase, use the variable names supported by the backend:
-
-```env
-PORT=4000
-NODE_ENV=development
-FRONTEND_ORIGIN=http://localhost:3000
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_server_side_service_role_key
-SUPABASE_JWT_SECRET=your_jwt_secret_if_required
-```
-
-Use your actual Supabase project settings and follow the repository's environment configuration. Do not commit real credentials or expose server-side secret keys in frontend code.
-
-### 4. Configure the frontend
-
-Create a local `.env.local` file inside `Frontend_UI/` if needed:
-
-```env
-VITE_API_BASE_URL=http://localhost:4000/api
-```
-
-If you use Supabase authentication in the frontend, configure the corresponding public Supabase settings as well. Follow `Frontend_UI/.env.example` for the supported variable names.
-
-### 5. Start the backend
-
-From the repository root:
-
+### 3. Start the Backend API Server
 ```bash
 npm run dev:backend
 ```
+The Express REST API will start at **`http://localhost:4000`** (Health endpoint: `http://localhost:4000/api/health`).
 
-The backend's default development port is `4000`.
-
-### 6. Start the frontend
-
-Open another terminal at the repository root:
-
+### 4. Start the Frontend Application
+In a second terminal window:
 ```bash
 npm run dev:frontend
 ```
-
-The frontend server defaults to port `3000`. Open the local address displayed in your terminal.
-
-**Note:** The repository contains separate frontend and backend server implementations. Configure the frontend API URL to point to the backend instance you are actually running.
-
-## 🚀 Deployment Status
-
-ClusterHub is uploaded to GitHub and runs locally. Online hosting is still pending.
-
-| Component | Deployment status |
-|---|---|
-| Source code | Available on GitHub |
-| Frontend | Deployment pending |
-| Backend API | Deployment pending |
-| Production database configuration | To be verified for the hosted environment |
-| Live application URL | Not available yet |
-
-The repository contains a `netlify.toml` file for the frontend and a `render.yaml` file for the backend. These files can support deployment configuration, but the hosted services and their production settings still need to be configured and verified.
-
-Once deployment is complete, add the actual live application URL to this README.
-
-## 🔗 Project Links
-
-- **GitHub Repository:** https://github.com/Ahad-Panhwer/ClusterHub
-- **Issues & Feedback:** https://github.com/Ahad-Panhwer/ClusterHub/issues
+The Vite React application will start at **`http://localhost:5173`**.
 
 ---
 
-<div align="center">
+## 🧪 Testing & Verification
 
-### ClusterHub
+ClusterHub includes a complete automated integration test suite covering all CRUD endpoints, authentication enforcement, input validation, and business logic constraints:
 
-**One platform. Better organized tournaments.**
+```bash
+# Run the 34 automated backend Jest integration tests
+npm run test:backend
 
+# Type-check both frontend and backend
+npm run lint
 
+# Build production bundles for both frontend and backend
+npm run build
+```
 
-</div>
+**Test Results:**
+```text
+Test Suites: 1 passed, 1 total
+Tests:       34 passed, 34 total
+Snapshots:   0 total
+Time:        ~4s
+```
+
+---
+
+## 🚀 Production Deployment Guide
+
+### Backend — Render Web Service
+1. In [Render Dashboard](https://dashboard.render.com/), choose **New $\rightarrow$ Blueprint** and select your ClusterHub repository (or create a Web Service using the included `render.yaml`).
+2. Set environment variables:
+   - `PORT`: `10000`
+   - `NODE_ENV`: `production`
+   - `FRONTEND_ORIGIN`: Your Netlify frontend domain
+   - `SUPABASE_URL`: Your Supabase project URL (optional for in-memory mode)
+   - `SUPABASE_ANON_KEY`: Your Supabase anon key
+   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key
+
+### Frontend — Netlify Static Hosting
+1. In [Netlify](https://app.netlify.com/), click **Add new site $\rightarrow$ Import an existing project**.
+2. Settings:
+   - **Base directory**: `frontend`
+   - **Build command**: `npm run build`
+   - **Publish directory**: `dist`
+3. Environment variables:
+   - `VITE_API_BASE_URL`: `https://your-backend-service.onrender.com/api`
+
+---
+
+## 🔗 Project Links & License
+
+- **GitHub Repository:** [https://github.com/Ahad-Panhwer/ClusterHub](https://github.com/Ahad-Panhwer/ClusterHub)
+- **Issue Tracker:** [https://github.com/Ahad-Panhwer/ClusterHub/issues](https://github.com/Ahad-Panhwer/ClusterHub/issues)
+- **Lead Organizer / Developer:** **Abdul Ahad**

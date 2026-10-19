@@ -4,14 +4,14 @@
   "private": true,
   "description": "ClusterHub — Gaming Tournament & Match Management System (Monorepo Workspace)",
   "scripts": {
-    "dev:backend": "npm --prefix GameTrack_Project/backend run dev",
-    "dev:frontend": "npm --prefix Frontend_UI run dev",
-    "build:backend": "npm --prefix GameTrack_Project/backend run build",
-    "build:frontend": "npm --prefix Frontend_UI run build",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
     "build": "npm run build:backend && npm run build:frontend",
-    "test:backend": "npm --prefix GameTrack_Project/backend test",
-    "lint:backend": "npm --prefix GameTrack_Project/backend run lint",
-    "lint:frontend": "npm --prefix Frontend_UI run lint",
+    "test:backend": "npm --prefix backend test",
+    "lint:backend": "npm --prefix backend run lint",
+    "lint:frontend": "npm --prefix frontend run lint",
     "lint": "npm run lint:backend && npm run lint:frontend"
   }
 }
