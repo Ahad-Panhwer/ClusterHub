@@ -32,6 +32,17 @@ const server = app.listen(config.port, '0.0.0.0', async () => {
   }
 });
 
+// Handle port conflicts gracefully
+server.on('error', (err: any) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n❌ Port ${config.port} is already in use by another instance or process.`);
+    console.error(`👉 Solution: Stop the existing process running on port ${config.port}, or set PORT=4001 in backend/.env.local.\n`);
+    process.exit(1);
+  }
+  console.error('Server error:', err);
+  process.exit(1);
+});
+
 // Graceful shutdown
 function shutdown(signal: string) {
   console.log(`\n${signal} received. Shutting down gracefully...`);
