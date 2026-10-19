@@ -1,19 +1,35 @@
 import { createApp } from './app.js';
-import { config, isSupabaseConfigured } from './config/index.js';
+import { config, isMongoConfigured, isSupabaseConfigured } from './config/index.js';
+import { connectMongo, seedMongoIfEmpty } from './lib/mongodb.js';
 
 const app = createApp();
 
-const server = app.listen(config.port, '0.0.0.0', () => {
+const server = app.listen(config.port, '0.0.0.0', async () => {
+  const dbMode = isMongoConfigured()
+    ? '🍃 MongoDB Atlas'
+    : isSupabaseConfigured()
+    ? '✅ Supabase PostgreSQL'
+    : '⚡ In-memory fallback (development)';
+
   console.log('');
   console.log('╔═══════════════════════════════════════════╗');
   console.log('║          ClusterHub REST API              ║');
   console.log('╚═══════════════════════════════════════════╝');
   console.log(`  ► Local:    http://localhost:${config.port}`);
   console.log(`  ► Health:   http://localhost:${config.port}/api/health`);
-  console.log(`  ► Mode:     ${isSupabaseConfigured() ? '✅ Supabase PostgreSQL' : '⚡ In-memory (no Supabase credentials)'}`);
+  console.log(`  ► Database: ${dbMode}`);
   console.log(`  ► Env:      ${config.nodeEnv}`);
   console.log(`  ► Origins:  ${config.frontendOrigins.join(', ')}`);
   console.log('');
+
+  if (isMongoConfigured()) {
+    try {
+      await connectMongo();
+      await seedMongoIfEmpty();
+    } catch (err) {
+      console.error('Failed to initialize MongoDB Atlas connection on boot:', err);
+    }
+  }
 });
 
 // Graceful shutdown

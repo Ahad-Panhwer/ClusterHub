@@ -3,7 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
-import { config, isSupabaseConfigured } from './config/index.js';
+import { config, isMongoConfigured, isSupabaseConfigured } from './config/index.js';
 import { gamesRouter } from './routes/games.js';
 import { tournamentsRouter } from './routes/tournaments.js';
 import { matchesRouter } from './routes/matches.js';
@@ -28,7 +28,9 @@ export function createApp() {
       origin: (origin, callback) => {
         // Allow server-to-server and same-origin requests (no origin header)
         if (!origin) return callback(null, true);
-        if (config.frontendOrigins.includes(origin)) return callback(null, true);
+        if (config.frontendOrigins.includes('*') || config.frontendOrigins.includes(origin)) return callback(null, true);
+        // Allow Vercel preview & production deployments
+        if (origin.endsWith('.vercel.app')) return callback(null, true);
         // In development, allow all
         if (!config.isProduction) return callback(null, true);
         callback(new Error(`CORS: Origin "${origin}" is not allowed.`));
@@ -68,7 +70,11 @@ export function createApp() {
       service: 'ClusterHub API',
       version: '1.0.0',
       timestamp: new Date().toISOString(),
-      mode: isSupabaseConfigured() ? 'supabase' : 'in-memory',
+      mode: isMongoConfigured()
+        ? 'mongodb-atlas'
+        : isSupabaseConfigured()
+        ? 'supabase'
+        : 'in-memory',
     });
   };
 
@@ -101,7 +107,11 @@ export function createApp() {
       res.json({
         name: 'ClusterHub REST API',
         version: '1.0.0',
-        mode: isSupabaseConfigured() ? 'supabase-postgres' : 'in-memory-development',
+        mode: isMongoConfigured()
+          ? 'mongodb-atlas'
+          : isSupabaseConfigured()
+          ? 'supabase-postgres'
+          : 'in-memory-development',
         endpoints: [
           'GET  /api/health',
           'GET  /api/games',

@@ -1,11 +1,22 @@
 /**
- * Tournaments repository — Supabase and in-memory implementations.
+ * Tournaments repository.
+ * Supports MongoDB Atlas, Supabase, and in-memory implementations.
+ * Prioritizes MongoDB Atlas when MONGODB_URI is configured.
  */
 
+import { connectMongo } from '../lib/mongodb.js';
+import {
+  TournamentModel,
+  GameModel,
+  RegistrationModel,
+  MatchModel,
+  toEntity,
+} from '../models/index.js';
 import { getSupabaseClient } from '../lib/supabase.js';
-import { isSupabaseConfigured } from '../config/index.js';
+import { isMongoConfigured, isSupabaseConfigured } from '../config/index.js';
 import { store, newId } from '../lib/store.js';
 import {
+  Game,
   Tournament,
   TournamentFormat,
   TournamentStatus,
@@ -15,6 +26,12 @@ import {
 
 export const tournamentsRepo = {
   async getAll(): Promise<Tournament[]> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const docs = await TournamentModel.find().sort({ created_at: -1 }).lean();
+      return Promise.all(docs.map((d) => enrichTournamentMongo(d)));
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const { data, error } = await sb
@@ -24,10 +41,17 @@ export const tournamentsRepo = {
       if (error) throw error;
       return (data as any[]).map(mapDbTournament);
     }
+
     return store.tournaments.map((t) => enrichTournament(t));
   },
 
   async getById(id: string): Promise<Tournament | null> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const doc = await TournamentModel.findById(id).lean();
+      return doc ? enrichTournamentMongo(doc) : null;
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const { data, error } = await sb
@@ -38,11 +62,32 @@ export const tournamentsRepo = {
       if (error) throw error;
       return data ? mapDbTournament(data) : null;
     }
+
     const t = store.tournaments.find((t) => t.id === id);
     return t ? enrichTournament(t) : null;
   },
 
   async create(dto: CreateTournamentDto): Promise<Tournament> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const id = newId('tourn');
+      const doc = await TournamentModel.create({
+        _id: id,
+        title: dto.title.trim(),
+        game_id: dto.game_id,
+        format: dto.format,
+        status: dto.status ?? 'registration_open',
+        start_date: new Date(dto.start_date).toISOString(),
+        end_date: new Date(dto.end_date).toISOString(),
+        max_teams: dto.max_teams,
+        prize_pool: dto.prize_pool,
+        description: dto.description.trim(),
+        rules: dto.rules?.trim() ?? '',
+        created_at: new Date().toISOString(),
+      });
+      return enrichTournamentMongo(doc);
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const { data, error } = await sb
@@ -85,6 +130,24 @@ export const tournamentsRepo = {
   },
 
   async update(id: string, dto: UpdateTournamentDto): Promise<Tournament | null> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (dto.title !== undefined) patch.title = dto.title.trim();
+      if (dto.game_id !== undefined) patch.game_id = dto.game_id;
+      if (dto.format !== undefined) patch.format = dto.format;
+      if (dto.status !== undefined) patch.status = dto.status;
+      if (dto.start_date !== undefined) patch.start_date = new Date(dto.start_date).toISOString();
+      if (dto.end_date !== undefined) patch.end_date = new Date(dto.end_date).toISOString();
+      if (dto.max_teams !== undefined) patch.max_teams = dto.max_teams;
+      if (dto.prize_pool !== undefined) patch.prize_pool = dto.prize_pool;
+      if (dto.description !== undefined) patch.description = dto.description.trim();
+      if (dto.rules !== undefined) patch.rules = dto.rules.trim();
+
+      const updated = await TournamentModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+      return updated ? enrichTournamentMongo(updated) : null;
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const patch: Record<string, unknown> = {};
@@ -130,6 +193,14 @@ export const tournamentsRepo = {
   },
 
   async delete(id: string): Promise<boolean> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const res = await TournamentModel.findByIdAndDelete(id);
+      await RegistrationModel.deleteMany({ tournament_id: id });
+      await MatchModel.deleteMany({ tournament_id: id });
+      return !!res;
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const { error } = await sb.from('tournaments').delete().eq('id', id);
@@ -140,12 +211,27 @@ export const tournamentsRepo = {
     const idx = store.tournaments.findIndex((t) => t.id === id);
     if (idx === -1) return false;
     store.tournaments.splice(idx, 1);
-    // Clean up orphaned registrations and matches
     store.registrations = store.registrations.filter((r) => r.tournament_id !== id);
     store.matches = store.matches.filter((m) => m.tournament_id !== id);
     return true;
   },
 };
+
+/** Enrich a MongoDB tournament document with related game and confirmed registrations count */
+async function enrichTournamentMongo(doc: any): Promise<Tournament> {
+  const t = toEntity<Tournament>(doc);
+  const gameDoc = await GameModel.findById(t.game_id).lean();
+  const game = gameDoc ? toEntity<Game>(gameDoc) : undefined;
+  const regCount = await RegistrationModel.countDocuments({
+    tournament_id: t.id,
+    status: 'confirmed',
+  });
+  return {
+    ...t,
+    game,
+    registered_teams_count: regCount,
+  };
+}
 
 /** Enrich an in-memory tournament with related game and registration count */
 function enrichTournament(t: Tournament): Tournament {
@@ -177,13 +263,12 @@ function mapDbTournament(row: any): Tournament {
   };
 }
 
-// The DB schema uses single_elimination / round_robin, frontend uses display names
 function mapFormatToDb(format: TournamentFormat): string {
   switch (format) {
     case 'Single Elimination': return 'single_elimination';
-    case 'Double Elimination': return 'round_robin'; // not in schema, map to nearest
+    case 'Double Elimination': return 'round_robin';
     case 'Round Robin': return 'round_robin';
-    case 'Swiss': return 'single_elimination'; // not in schema, map to nearest
+    case 'Swiss': return 'single_elimination';
     default: return 'single_elimination';
   }
 }
@@ -197,7 +282,6 @@ function mapDbFormat(dbFormat: string): TournamentFormat {
 }
 
 function mapStatusToDb(status: TournamentStatus): string {
-  // Frontend uses 'registration_open', DB uses 'open'
   switch (status) {
     case 'registration_open': return 'open';
     case 'draft': return 'draft';

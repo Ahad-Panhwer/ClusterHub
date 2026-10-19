@@ -261,6 +261,8 @@ export const store = {
   registrations: [...seedRegistrations] as Registration[],
 };
 
+export { seedGames, seedTournaments, seedTeams, seedMatches, seedRegistrations };
+
 /** Generate a short unique ID for new records */
 export function newId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

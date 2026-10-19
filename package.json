@@ -12,6 +12,7 @@
     "test:backend": "npm --prefix backend test",
     "lint:backend": "npm --prefix backend run lint",
     "lint:frontend": "npm --prefix frontend run lint",
-    "lint": "npm run lint:backend && npm run lint:frontend"
+    "lint": "npm run lint:backend && npm run lint:frontend",
+    "seed:mongo": "npm --prefix backend run seed:mongo"
   }
 }

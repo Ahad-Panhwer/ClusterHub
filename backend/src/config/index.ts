@@ -1,4 +1,9 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Load .env.local first (local overrides), then fall back to .env
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 function required(key: string): string {
   const val = process.env[key];
@@ -20,6 +25,10 @@ export const config = {
   // Allow comma-separated origins e.g. "http://localhost:5173,https://clusterhub.netlify.app"
   frontendOrigins: optional('FRONTEND_ORIGIN', 'http://localhost:5173').split(',').map((o) => o.trim()),
 
+  mongodb: {
+    uri: optional('MONGODB_URI', ''),
+  },
+
   supabase: {
     url: optional('SUPABASE_URL', ''),
     anonKey: optional('SUPABASE_ANON_KEY', ''),
@@ -27,6 +36,16 @@ export const config = {
     jwtSecret: optional('SUPABASE_JWT_SECRET', ''),
   },
 };
+
+/**
+ * Returns true if MongoDB Atlas is configured via MONGODB_URI.
+ */
+export function isMongoConfigured(): boolean {
+  return !!(
+    config.mongodb.uri &&
+    (config.mongodb.uri.startsWith('mongodb://') || config.mongodb.uri.startsWith('mongodb+srv://'))
+  );
+}
 
 /**
  * Returns true if the Supabase connection is configured (URL and at least one key present).

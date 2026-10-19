@@ -35,15 +35,16 @@ graph TD
     D --> F[Auth & Role Verification]
     D --> G[Zod Schema Validation]
     G --> H[Repository Layer]
-    H -->|Production| I[(Supabase PostgreSQL)]
-    H -->|Local Dev Fallback| J[In-Memory Store with Seed Data]
+    H -->|Primary Database| I[(MongoDB Atlas Mongoose)]
+    H -->|Optional Fallback| J[(Supabase PostgreSQL)]
+    H -->|Local Dev Fallback| K[In-Memory Store with Seed Data]
 ```
 
 ClusterHub uses a clean full-stack monorepo architecture:
 - **`frontend/`**: React 19 + TypeScript + Vite + Tailwind CSS v4 with glassmorphism dark gaming UI.
-- **`backend/`**: Node.js + Express + TypeScript REST API providing full validation, authorization, and dual base path support (`/api/*` and `/api/v1/*`).
-- **`database/`**: Versioned PostgreSQL migrations, Row-Level Security (RLS) policies, and seed data for Supabase.
-- **`docs/`**: Complete engineering specifications, API contracts, database schema, and deployment plans.
+- **`backend/`**: Node.js + Express + TypeScript REST API with MongoDB Atlas (via Mongoose models), full validation, authorization, and dual base path support (`/api/*` and `/api/v1/*`).
+- **`database/`**: Versioned database schemas and SQL migrations for optional PostgreSQL / Supabase deployments.
+- **`docs/`**: Complete engineering specifications, API contracts, Vercel deployment guide, and database schemas.
 
 ---
 
@@ -166,13 +167,25 @@ npm --prefix backend install
 npm --prefix frontend install
 ```
 
-### 3. Start the Backend API Server
+### 3. Configure MongoDB Atlas (Optional but Recommended)
+Add your MongoDB Atlas connection string to `backend/.env.local`:
+```env
+MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/clusterhub?retryWrites=true&w=majority
+```
+*(If omitted, ClusterHub runs seamlessly on the built-in in-memory seed store).*
+
+To seed your MongoDB Atlas cluster with initial gaming tournaments, teams, and matches:
+```bash
+npm run seed:mongo
+```
+
+### 4. Start the Backend API Server
 ```bash
 npm run dev:backend
 ```
 The Express REST API will start at **`http://localhost:4000`** (Health endpoint: `http://localhost:4000/api/health`).
 
-### 4. Start the Frontend Application
+### 5. Start the Frontend Application
 In a second terminal window:
 ```bash
 npm run dev:frontend
@@ -208,24 +221,26 @@ Time:        ~4s
 
 ## 🚀 Production Deployment Guide
 
-### Backend — Render Web Service
-1. In [Render Dashboard](https://dashboard.render.com/), choose **New $\rightarrow$ Blueprint** and select your ClusterHub repository (or create a Web Service using the included `render.yaml`).
-2. Set environment variables:
-   - `PORT`: `10000`
-   - `NODE_ENV`: `production`
-   - `FRONTEND_ORIGIN`: Your Netlify frontend domain
-   - `SUPABASE_URL`: Your Supabase project URL (optional for in-memory mode)
-   - `SUPABASE_ANON_KEY`: Your Supabase anon key
-   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key
+### Option A — Vercel (Recommended for Frontend & Serverless Backend)
+Detailed instructions are in the [Vercel Deployment Guide](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/docs/VERCEL_DEPLOYMENT_GUIDE.md).
+1. **Backend Project**:
+   - In [Vercel Dashboard](https://vercel.com/dashboard), import the repository.
+   - Set **Root Directory** to `backend`, Framework: `Other`.
+   - Add environment variable: `NODE_ENV=production`, `FRONTEND_ORIGIN=*`.
+   - Click **Deploy** and copy your API URL (e.g. `https://clusterhub-api.vercel.app`).
+2. **Frontend Project**:
+   - In Vercel, import the repository again as a second project.
+   - Set **Root Directory** to `frontend`, Framework: `Vite`.
+   - Add environment variable: `VITE_API_BASE_URL=https://clusterhub-api.vercel.app/api`.
+   - Click **Deploy** and open your live gaming tournament portal!
 
-### Frontend — Netlify Static Hosting
-1. In [Netlify](https://app.netlify.com/), click **Add new site $\rightarrow$ Import an existing project**.
-2. Settings:
-   - **Base directory**: `frontend`
-   - **Build command**: `npm run build`
-   - **Publish directory**: `dist`
-3. Environment variables:
-   - `VITE_API_BASE_URL`: `https://your-backend-service.onrender.com/api`
+### Option B — Render (Backend Web Service) + Netlify (Frontend)
+1. **Backend (Render)**:
+   - Use the included `render.yaml` Blueprint or create a Web Service pointing to `backend/`.
+   - Set build command: `npm install && npm run build`, start command: `npm start`.
+2. **Frontend (Netlify)**:
+   - Set base directory to `frontend/`, build command: `npm run build`, publish directory: `dist`.
+   - Set `VITE_API_BASE_URL` to your Render API URL.
 
 ---
 

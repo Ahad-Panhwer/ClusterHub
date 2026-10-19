@@ -1,14 +1,25 @@
 /**
- * Matches repository — Supabase and in-memory implementations.
+ * Matches repository.
+ * Supports MongoDB Atlas, Supabase, and in-memory implementations.
+ * Prioritizes MongoDB Atlas when MONGODB_URI is configured.
  */
 
+import { connectMongo } from '../lib/mongodb.js';
+import { MatchModel, TournamentModel, TeamModel, toEntity } from '../models/index.js';
 import { getSupabaseClient } from '../lib/supabase.js';
-import { isSupabaseConfigured } from '../config/index.js';
+import { isMongoConfigured, isSupabaseConfigured } from '../config/index.js';
 import { store, newId } from '../lib/store.js';
-import { Match, MatchStatus, CreateMatchDto, UpdateMatchDto } from '../types/index.js';
+import { Match, MatchStatus, CreateMatchDto, UpdateMatchDto, Tournament, Team } from '../types/index.js';
 
 export const matchesRepo = {
   async getAll(tournamentId?: string): Promise<Match[]> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const filter = tournamentId ? { tournament_id: tournamentId } : {};
+      const docs = await MatchModel.find(filter).sort({ scheduled_at: 1 }).lean();
+      return Promise.all(docs.map((d) => enrichMatchMongo(d)));
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       let q = sb
@@ -27,6 +38,12 @@ export const matchesRepo = {
   },
 
   async getById(id: string): Promise<Match | null> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const doc = await MatchModel.findById(id).lean();
+      return doc ? enrichMatchMongo(doc) : null;
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const { data, error } = await sb
@@ -37,11 +54,33 @@ export const matchesRepo = {
       if (error) throw error;
       return data ? mapDbMatch(data) : null;
     }
+
     const m = store.matches.find((m) => m.id === id);
     return m ? enrichMatch(m) : null;
   },
 
   async create(dto: CreateMatchDto): Promise<Match> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const id = newId('match');
+      const doc = await MatchModel.create({
+        _id: id,
+        tournament_id: dto.tournament_id,
+        team1_id: dto.team1_id,
+        team2_id: dto.team2_id,
+        round: dto.round || `Round ${dto.round_number ?? 1}`,
+        round_number: dto.round_number ?? 1,
+        scheduled_at: new Date(dto.scheduled_at).toISOString(),
+        status: 'scheduled',
+        team1_score: 0,
+        team2_score: 0,
+        winner_id: null,
+        notes: dto.notes ?? '',
+        created_at: new Date().toISOString(),
+      });
+      return enrichMatchMongo(doc);
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const { data, error } = await sb
@@ -82,6 +121,35 @@ export const matchesRepo = {
   },
 
   async update(id: string, dto: UpdateMatchDto): Promise<Match | null> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const curDoc = await MatchModel.findById(id).lean();
+      if (!curDoc) return null;
+
+      let winnerId = dto.winner_id !== undefined ? dto.winner_id : curDoc.winner_id;
+      const newStatus = dto.status ?? curDoc.status;
+      const s1 = dto.team1_score !== undefined ? dto.team1_score : curDoc.team1_score;
+      const s2 = dto.team2_score !== undefined ? dto.team2_score : curDoc.team2_score;
+      if (newStatus === 'completed' && dto.winner_id === undefined) {
+        if (s1 > s2) winnerId = curDoc.team1_id;
+        else if (s2 > s1) winnerId = curDoc.team2_id;
+        else winnerId = null;
+      }
+
+      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (dto.scheduled_at !== undefined) patch.scheduled_at = new Date(dto.scheduled_at).toISOString();
+      if (dto.round !== undefined) patch.round = dto.round;
+      if (dto.round_number !== undefined) patch.round_number = dto.round_number;
+      if (dto.status !== undefined) patch.status = dto.status;
+      if (dto.team1_score !== undefined) patch.team1_score = dto.team1_score;
+      if (dto.team2_score !== undefined) patch.team2_score = dto.team2_score;
+      if (dto.notes !== undefined) patch.notes = dto.notes;
+      patch.winner_id = winnerId ?? null;
+
+      const updated = await MatchModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+      return updated ? enrichMatchMongo(updated) : null;
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const patch: Record<string, unknown> = {};
@@ -105,7 +173,6 @@ export const matchesRepo = {
     if (idx === -1) return null;
     const cur = store.matches[idx];
 
-    // Auto-compute winner_id when completing a match
     let winnerId = dto.winner_id !== undefined ? dto.winner_id : cur.winner_id;
     const newStatus = dto.status ?? cur.status;
     const s1 = dto.team1_score !== undefined ? dto.team1_score : cur.team1_score;
@@ -133,12 +200,19 @@ export const matchesRepo = {
   },
 
   async delete(id: string): Promise<boolean> {
+    if (isMongoConfigured()) {
+      await connectMongo();
+      const res = await MatchModel.findByIdAndDelete(id);
+      return !!res;
+    }
+
     if (isSupabaseConfigured()) {
       const sb = getSupabaseClient()!;
       const { error } = await sb.from('matches').delete().eq('id', id);
       if (error) throw error;
       return true;
     }
+
     const idx = store.matches.findIndex((m) => m.id === id);
     if (idx === -1) return false;
     store.matches.splice(idx, 1);
@@ -150,6 +224,22 @@ export const matchesRepo = {
     return all.filter((m) => m.status === 'completed');
   },
 };
+
+/** Enrich a MongoDB match document with related tournament and teams */
+async function enrichMatchMongo(doc: any): Promise<Match> {
+  const m = toEntity<Match>(doc);
+  const [tournamentDoc, team1Doc, team2Doc] = await Promise.all([
+    TournamentModel.findById(m.tournament_id).lean(),
+    TeamModel.findById(m.team1_id).lean(),
+    TeamModel.findById(m.team2_id).lean(),
+  ]);
+  return {
+    ...m,
+    tournament: tournamentDoc ? toEntity<Tournament>(tournamentDoc) : undefined,
+    team1: team1Doc ? toEntity<Team>(team1Doc) : undefined,
+    team2: team2Doc ? toEntity<Team>(team2Doc) : undefined,
+  };
+}
 
 function enrichMatch(m: Match): Match {
   const tournament = store.tournaments.find((t) => t.id === m.tournament_id);
