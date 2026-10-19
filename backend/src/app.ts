@@ -101,50 +101,34 @@ export function createApp() {
     app.use(`/api/v1${subPath}`, router);
   }
 
-  // ── Development info route ────────────────────────────────────────────────
-  if (!config.isProduction) {
-    app.get('/api', (_req, res) => {
-      res.json({
-        name: 'ClusterHub REST API',
-        version: '1.0.0',
-        mode: isMongoConfigured()
-          ? 'mongodb-atlas'
-          : isSupabaseConfigured()
-          ? 'supabase-postgres'
-          : 'in-memory-development',
-        endpoints: [
-          'GET  /api/health',
-          'GET  /api/games',
-          'POST /api/games',
-          'GET  /api/games/:id',
-          'PATCH /api/games/:id',
-          'DELETE /api/games/:id',
-          'GET  /api/tournaments',
-          'POST /api/tournaments',
-          'GET  /api/tournaments/:id',
-          'PATCH /api/tournaments/:id',
-          'DELETE /api/tournaments/:id',
-          'GET  /api/tournaments/:id/leaderboard',
-          'GET  /api/matches',
-          'POST /api/matches',
-          'GET  /api/matches/:id',
-          'PATCH /api/matches/:id',
-          'DELETE /api/matches/:id',
-          'GET  /api/teams',
-          'POST /api/teams',
-          'GET  /api/teams/:id',
-          'PATCH /api/teams/:id',
-          'DELETE /api/teams/:id',
-          'GET  /api/registrations',
-          'POST /api/registrations',
-          'GET  /api/registrations/:id',
-          'PATCH /api/registrations/:id',
-          'DELETE /api/registrations/:id',
-          'GET  /api/leaderboard',
-        ],
-      });
+  // ── Root & API Directory routes ──────────────────────────────────────────
+  const rootInfoHandler = (_req: express.Request, res: express.Response) => {
+    res.json({
+      status: 'ok',
+      service: 'ClusterHub REST API',
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+      mode: isMongoConfigured()
+        ? 'mongodb-atlas'
+        : isSupabaseConfigured()
+        ? 'supabase-postgres'
+        : 'in-memory-development',
+      health: '/api/health',
+      endpoints: {
+        health: '/api/health',
+        games: '/api/games',
+        tournaments: '/api/tournaments',
+        matches: '/api/matches',
+        teams: '/api/teams',
+        registrations: '/api/registrations',
+        leaderboard: '/api/leaderboard',
+      },
     });
-  }
+  };
+
+  app.get('/', rootInfoHandler);
+  app.get('/api', rootInfoHandler);
+  app.get('/api/v1', rootInfoHandler);
 
   // ── 404 and error handlers (must be last) ─────────────────────────────────
   app.use(notFoundHandler);
