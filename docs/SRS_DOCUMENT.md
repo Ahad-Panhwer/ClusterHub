@@ -8,6 +8,7 @@
 **Standard Compliance:** IEEE Std 830-1998 / ISO/IEC/IEEE 29148:2018  
 **Project Category:** Responsive Full-Stack Esports & Tournament Management Web Application  
 **Lead Architect & Organizer:** Abdul Ahad  
+**Live Deployed Application:** [https://cluster-hub-uikz.vercel.app/](https://cluster-hub-uikz.vercel.app/)  
 **Organization / Repository:** [Ahad-Panhwer/ClusterHub](https://github.com/Ahad-Panhwer/ClusterHub)  
 **Date of Release:** October 2026  
 
