@@ -9,6 +9,7 @@ A modern, full-stack esports and gaming tournament management platform connectin
 <br>
 
 ![Project Status](https://img.shields.io/badge/Status-Fully%20Verified%20%26%20Active-16a34a?style=for-the-badge)
+[![Live Deployment](https://img.shields.io/badge/Live%20Portal-Vercel%20Deployed-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://cluster-hub-uikz.vercel.app/)
 ![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-Backend-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
@@ -18,7 +19,11 @@ A modern, full-stack esports and gaming tournament management platform connectin
 
 <br>
 
-[Live Portal](https://cluster-hub-uikz.vercel.app/) · [Repository](https://github.com/Ahad-Panhwer/ClusterHub) · [Source Code](https://github.com/Ahad-Panhwer/ClusterHub/tree/main) · [Report an Issue](https://github.com/Ahad-Panhwer/ClusterHub/issues)
+### 🌐 **[Click Here to Open Live Application: https://cluster-hub-uikz.vercel.app/](https://cluster-hub-uikz.vercel.app/)**
+
+<br>
+
+[Live Portal](https://cluster-hub-uikz.vercel.app/) · [SRS Document](https://github.com/Ahad-Panhwer/ClusterHub/blob/main/docs/SRS_DOCUMENT.md) · [Deployment Techniques](#-production-deployment-techniques--architecture) · [Repository](https://github.com/Ahad-Panhwer/ClusterHub) · [Report an Issue](https://github.com/Ahad-Panhwer/ClusterHub/issues)
 
 </div>
 
