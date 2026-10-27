@@ -1,4 +1,8 @@
 import express from 'express';
+// Must be imported before any routes are registered: it patches Express 4 so
+// errors thrown/rejected in async handlers reach errorHandler instead of
+// leaving the request hanging with no response.
+import 'express-async-errors';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';

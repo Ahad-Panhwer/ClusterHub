@@ -14,10 +14,15 @@ import { Registration, RegistrationStatus, CreateRegistrationDto, Tournament, Te
 export const registrationsRepo = {
   async getAll(tournamentId?: string): Promise<Registration[]> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const filter = tournamentId ? { tournament_id: tournamentId } : {};
-      const docs = await RegistrationModel.find(filter).sort({ registered_at: -1 }).lean();
-      return Promise.all(docs.map((d) => enrichRegMongo(d)));
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const filter = tournamentId ? { tournament_id: tournamentId } : {};
+        const docs = await RegistrationModel.find(filter).sort({ registered_at: -1 }).lean();
+        return Promise.all(docs.map((d) => enrichRegMongo(d)));
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -36,9 +41,14 @@ export const registrationsRepo = {
 
   async getById(id: string): Promise<Registration | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const doc = await RegistrationModel.findById(id).lean();
-      return doc ? enrichRegMongo(doc) : null;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const doc = await RegistrationModel.findById(id).lean();
+        return doc ? enrichRegMongo(doc) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -54,9 +64,14 @@ export const registrationsRepo = {
 
   async findExisting(tournamentId: string, teamId: string): Promise<Registration | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const doc = await RegistrationModel.findOne({ tournament_id: tournamentId, team_id: teamId }).lean();
-      return doc ? enrichRegMongo(doc) : null;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const doc = await RegistrationModel.findOne({ tournament_id: tournamentId, team_id: teamId }).lean();
+        return doc ? enrichRegMongo(doc) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -76,8 +91,13 @@ export const registrationsRepo = {
 
   async countConfirmed(tournamentId: string): Promise<number> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      return RegistrationModel.countDocuments({ tournament_id: tournamentId, status: 'confirmed' });
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        return RegistrationModel.countDocuments({ tournament_id: tournamentId, status: 'confirmed' });
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -96,17 +116,22 @@ export const registrationsRepo = {
 
   async create(dto: CreateRegistrationDto, assignedStatus: RegistrationStatus, seedNumber: number): Promise<Registration> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const id = newId('reg');
-      const doc = await RegistrationModel.create({
-        _id: id,
-        tournament_id: dto.tournament_id,
-        team_id: dto.team_id,
-        status: assignedStatus,
-        registered_at: new Date().toISOString(),
-        seed_number: seedNumber,
-      });
-      return enrichRegMongo(doc);
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const id = newId('reg');
+        const doc = await RegistrationModel.create({
+          _id: id,
+          tournament_id: dto.tournament_id,
+          team_id: dto.team_id,
+          status: assignedStatus,
+          registered_at: new Date().toISOString(),
+          seed_number: seedNumber,
+        });
+        return enrichRegMongo(doc);
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -138,13 +163,18 @@ export const registrationsRepo = {
 
   async updateStatus(id: string, status: RegistrationStatus): Promise<Registration | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const updated = await RegistrationModel.findByIdAndUpdate(
-        id,
-        { $set: { status } },
-        { new: true }
-      ).lean();
-      return updated ? enrichRegMongo(updated) : null;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const updated = await RegistrationModel.findByIdAndUpdate(
+          id,
+          { $set: { status } },
+          { new: true }
+        ).lean();
+        return updated ? enrichRegMongo(updated) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -167,9 +197,14 @@ export const registrationsRepo = {
 
   async delete(id: string): Promise<boolean> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const res = await RegistrationModel.findByIdAndDelete(id);
-      return !!res;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const res = await RegistrationModel.findByIdAndDelete(id);
+        return !!res;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {

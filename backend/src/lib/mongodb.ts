@@ -30,8 +30,16 @@ if (!global.__mongooseCache) {
   global.__mongooseCache = cached;
 }
 
+/** After a failed connection attempt, don't retry on every request for this long. */
+const MONGO_FAILURE_COOLDOWN_MS = 30_000;
+let lastMongoFailureAt = 0;
+
 /**
  * Connect to MongoDB Atlas with connection caching for long-running servers and Vercel serverless.
+ *
+ * Returns null (instead of throwing) when MongoDB cannot be reached, so callers
+ * can fall back to the next data tier. A failed attempt starts a cooldown, so a
+ * dead cluster cannot add a full server-selection timeout to every request.
  */
 export async function connectMongo(): Promise<typeof mongoose | null> {
   if (!isMongoConfigured()) {
@@ -40,6 +48,10 @@ export async function connectMongo(): Promise<typeof mongoose | null> {
 
   if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
+  }
+
+  if (lastMongoFailureAt && Date.now() - lastMongoFailureAt < MONGO_FAILURE_COOLDOWN_MS) {
+    return null;
   }
 
   if (!cached.promise) {
@@ -61,8 +73,9 @@ export async function connectMongo(): Promise<typeof mongoose | null> {
   } catch (error) {
     cached.promise = null;
     cached.conn = null;
+    lastMongoFailureAt = Date.now();
     console.error('❌ Failed to connect to MongoDB Atlas:', error);
-    throw error;
+    return null;
   }
 
   return cached.conn;
@@ -82,7 +95,8 @@ export async function seedMongoIfEmpty(): Promise<void> {
   if (!isMongoConfigured()) return;
 
   try {
-    await connectMongo();
+    const conn = await connectMongo();
+    if (!conn) return; // Mongo unreachable — seeding is skipped, callers fall back
     const gameCount = await GameModel.countDocuments();
     if (gameCount > 0) {
       return; // Already populated

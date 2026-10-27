@@ -64,6 +64,7 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
+  // Log, but do NOT exit: one failed request (e.g. a database timeout) must
+  // not kill the whole server for every other user.
   console.error('Unhandled rejection:', reason);
-  process.exit(1);
 });

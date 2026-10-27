@@ -27,9 +27,14 @@ import {
 export const tournamentsRepo = {
   async getAll(): Promise<Tournament[]> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const docs = await TournamentModel.find().sort({ created_at: -1 }).lean();
-      return Promise.all(docs.map((d) => enrichTournamentMongo(d)));
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const docs = await TournamentModel.find().sort({ created_at: -1 }).lean();
+        return Promise.all(docs.map((d) => enrichTournamentMongo(d)));
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -47,9 +52,14 @@ export const tournamentsRepo = {
 
   async getById(id: string): Promise<Tournament | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const doc = await TournamentModel.findById(id).lean();
-      return doc ? enrichTournamentMongo(doc) : null;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const doc = await TournamentModel.findById(id).lean();
+        return doc ? enrichTournamentMongo(doc) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -69,23 +79,28 @@ export const tournamentsRepo = {
 
   async create(dto: CreateTournamentDto): Promise<Tournament> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const id = newId('tourn');
-      const doc = await TournamentModel.create({
-        _id: id,
-        title: dto.title.trim(),
-        game_id: dto.game_id,
-        format: dto.format,
-        status: dto.status ?? 'registration_open',
-        start_date: new Date(dto.start_date).toISOString(),
-        end_date: new Date(dto.end_date).toISOString(),
-        max_teams: dto.max_teams,
-        prize_pool: dto.prize_pool,
-        description: dto.description.trim(),
-        rules: dto.rules?.trim() ?? '',
-        created_at: new Date().toISOString(),
-      });
-      return enrichTournamentMongo(doc);
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const id = newId('tourn');
+        const doc = await TournamentModel.create({
+          _id: id,
+          title: dto.title.trim(),
+          game_id: dto.game_id,
+          format: dto.format,
+          status: dto.status ?? 'registration_open',
+          start_date: new Date(dto.start_date).toISOString(),
+          end_date: new Date(dto.end_date).toISOString(),
+          max_teams: dto.max_teams,
+          prize_pool: dto.prize_pool,
+          description: dto.description.trim(),
+          rules: dto.rules?.trim() ?? '',
+          created_at: new Date().toISOString(),
+        });
+        return enrichTournamentMongo(doc);
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -131,21 +146,26 @@ export const tournamentsRepo = {
 
   async update(id: string, dto: UpdateTournamentDto): Promise<Tournament | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (dto.title !== undefined) patch.title = dto.title.trim();
-      if (dto.game_id !== undefined) patch.game_id = dto.game_id;
-      if (dto.format !== undefined) patch.format = dto.format;
-      if (dto.status !== undefined) patch.status = dto.status;
-      if (dto.start_date !== undefined) patch.start_date = new Date(dto.start_date).toISOString();
-      if (dto.end_date !== undefined) patch.end_date = new Date(dto.end_date).toISOString();
-      if (dto.max_teams !== undefined) patch.max_teams = dto.max_teams;
-      if (dto.prize_pool !== undefined) patch.prize_pool = dto.prize_pool;
-      if (dto.description !== undefined) patch.description = dto.description.trim();
-      if (dto.rules !== undefined) patch.rules = dto.rules.trim();
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (dto.title !== undefined) patch.title = dto.title.trim();
+        if (dto.game_id !== undefined) patch.game_id = dto.game_id;
+        if (dto.format !== undefined) patch.format = dto.format;
+        if (dto.status !== undefined) patch.status = dto.status;
+        if (dto.start_date !== undefined) patch.start_date = new Date(dto.start_date).toISOString();
+        if (dto.end_date !== undefined) patch.end_date = new Date(dto.end_date).toISOString();
+        if (dto.max_teams !== undefined) patch.max_teams = dto.max_teams;
+        if (dto.prize_pool !== undefined) patch.prize_pool = dto.prize_pool;
+        if (dto.description !== undefined) patch.description = dto.description.trim();
+        if (dto.rules !== undefined) patch.rules = dto.rules.trim();
 
-      const updated = await TournamentModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
-      return updated ? enrichTournamentMongo(updated) : null;
+        const updated = await TournamentModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+        return updated ? enrichTournamentMongo(updated) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -194,11 +214,16 @@ export const tournamentsRepo = {
 
   async delete(id: string): Promise<boolean> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const res = await TournamentModel.findByIdAndDelete(id);
-      await RegistrationModel.deleteMany({ tournament_id: id });
-      await MatchModel.deleteMany({ tournament_id: id });
-      return !!res;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const res = await TournamentModel.findByIdAndDelete(id);
+        await RegistrationModel.deleteMany({ tournament_id: id });
+        await MatchModel.deleteMany({ tournament_id: id });
+        return !!res;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {

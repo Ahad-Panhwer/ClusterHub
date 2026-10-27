@@ -18,12 +18,15 @@ export class ApiError extends Error {
   }
 }
 
+/** Give up on a request after this long instead of loading forever. */
+export const API_TIMEOUT_MS = 12_000;
+
 export async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
   const token = localStorage.getItem('clusterhub_auth_token');
-  
+
   const headers = new Headers(options.headers || {});
   headers.set('Content-Type', 'application/json');
   if (token) {
@@ -32,10 +35,21 @@ export async function request<T>(
 
   const url = `${API_BASE_URL.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}`;
 
+  // Without a timeout, a backend that accepts the connection but never
+  // responds leaves fetch pending forever and the UI stuck on skeletons.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const callerSignal = options.signal;
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
   try {
     const response = await fetch(url, {
       ...options,
       headers,
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -61,10 +75,18 @@ export async function request<T>(
     return await response.json();
   } catch (err: any) {
     if (err instanceof ApiError) throw err;
+    if (err?.name === 'AbortError') {
+      throw new ApiError(
+        `Request timed out after ${API_TIMEOUT_MS / 1000}s: the backend API did not respond.`,
+        0
+      );
+    }
     throw new ApiError(
       err.message || 'Network error: Unable to reach backend API',
       0
     );
+  } finally {
+    clearTimeout(timer);
   }
 }
 

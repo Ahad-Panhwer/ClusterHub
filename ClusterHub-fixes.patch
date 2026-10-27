@@ -1,0 +1,1082 @@
+diff --git a/backend/api/index.ts b/backend/api/index.ts
+index 5910ecd..7bdff78 100644
+--- a/backend/api/index.ts
++++ b/backend/api/index.ts
+@@ -4,14 +4,45 @@ import { isMongoConfigured } from '../src/config/index.js';
+ 
+ const app = createApp();
+ 
+-export default async function handler(req: any, res: any) {
+-  if (isMongoConfigured()) {
++/**
++ * MongoDB init runs at most once per minute per serverless instance — not on
++ * every request. Previously this handler awaited connectMongo() +
++ * seedMongoIfEmpty() for EVERY request, so health checks also paid a full
++ * connection attempt (and seeding query) before being answered.
++ */
++const INIT_RETRY_MS = 60_000;
++let initPromise: Promise<void> | null = null;
++let initStartedAt = 0;
++
++function ensureMongoInit(): Promise<void> {
++  if (!isMongoConfigured()) return Promise.resolve();
++  if (initPromise && Date.now() - initStartedAt < INIT_RETRY_MS) {
++    return initPromise;
++  }
++  initStartedAt = Date.now();
++  initPromise = (async () => {
+     try {
+       await connectMongo();
+       await seedMongoIfEmpty();
+     } catch (err) {
+-      console.error('MongoDB Atlas serverless connection error:', err);
++      // Never let a database problem fail the request itself: repositories
++      // fall back to the next data tier when MongoDB is unavailable.
++      console.error('MongoDB Atlas serverless init error:', err);
+     }
++  })();
++  return initPromise;
++}
++
++// Warm up on cold start, without blocking the first request.
++void ensureMongoInit();
++
++const FAST_PATHS = ['/', '/api', '/api/v1', '/health', '/api/health', '/api/v1/health'];
++
++export default async function handler(req: any, res: any) {
++  const path = String(req.url || '').split('?')[0];
++  // Health/root endpoints must answer immediately and never wait on the DB.
++  if (!FAST_PATHS.includes(path)) {
++    await ensureMongoInit();
+   }
+   return app(req, res);
+ }
+diff --git a/backend/package-lock.json b/backend/package-lock.json
+index 3b82118..ea576fb 100644
+--- a/backend/package-lock.json
++++ b/backend/package-lock.json
+@@ -12,6 +12,7 @@
+         "cors": "^2.8.5",
+         "dotenv": "^16.4.5",
+         "express": "^4.19.2",
++        "express-async-errors": "^3.1.1",
+         "express-rate-limit": "^7.4.1",
+         "helmet": "^8.0.0",
+         "mongoose": "^9.11.2",
+@@ -2919,6 +2920,15 @@
+         "url": "https://opencollective.com/express"
+       }
+     },
++    "node_modules/express-async-errors": {
++      "version": "3.1.1",
++      "resolved": "https://registry.npmjs.org/express-async-errors/-/express-async-errors-3.1.1.tgz",
++      "integrity": "sha512-h6aK1da4tpqWSbyCa3FxB/V6Ehd4EEB15zyQq9qe75OZBp0krinNKuH4rAY+S/U/2I36vdLAUFSjQJ+TFmODng==",
++      "license": "ISC",
++      "peerDependencies": {
++        "express": "^4.16.2"
++      }
++    },
+     "node_modules/express-rate-limit": {
+       "version": "7.5.1",
+       "resolved": "https://registry.npmjs.org/express-rate-limit/-/express-rate-limit-7.5.1.tgz",
+diff --git a/backend/package.json b/backend/package.json
+index 92ddd20..89f4948 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -17,6 +17,7 @@
+     "cors": "^2.8.5",
+     "dotenv": "^16.4.5",
+     "express": "^4.19.2",
++    "express-async-errors": "^3.1.1",
+     "express-rate-limit": "^7.4.1",
+     "helmet": "^8.0.0",
+     "mongoose": "^9.11.2",
+diff --git a/backend/src/app.ts b/backend/src/app.ts
+index 1a6a211..416ba62 100644
+--- a/backend/src/app.ts
++++ b/backend/src/app.ts
+@@ -1,4 +1,8 @@
+ import express from 'express';
++// Must be imported before any routes are registered: it patches Express 4 so
++// errors thrown/rejected in async handlers reach errorHandler instead of
++// leaving the request hanging with no response.
++import 'express-async-errors';
+ import cors from 'cors';
+ import helmet from 'helmet';
+ import rateLimit from 'express-rate-limit';
+diff --git a/backend/src/lib/mongodb.ts b/backend/src/lib/mongodb.ts
+index d4f0b0d..56604d9 100644
+--- a/backend/src/lib/mongodb.ts
++++ b/backend/src/lib/mongodb.ts
+@@ -30,8 +30,16 @@ if (!global.__mongooseCache) {
+   global.__mongooseCache = cached;
+ }
+ 
++/** After a failed connection attempt, don't retry on every request for this long. */
++const MONGO_FAILURE_COOLDOWN_MS = 30_000;
++let lastMongoFailureAt = 0;
++
+ /**
+  * Connect to MongoDB Atlas with connection caching for long-running servers and Vercel serverless.
++ *
++ * Returns null (instead of throwing) when MongoDB cannot be reached, so callers
++ * can fall back to the next data tier. A failed attempt starts a cooldown, so a
++ * dead cluster cannot add a full server-selection timeout to every request.
+  */
+ export async function connectMongo(): Promise<typeof mongoose | null> {
+   if (!isMongoConfigured()) {
+@@ -42,6 +50,10 @@ export async function connectMongo(): Promise<typeof mongoose | null> {
+     return cached.conn;
+   }
+ 
++  if (lastMongoFailureAt && Date.now() - lastMongoFailureAt < MONGO_FAILURE_COOLDOWN_MS) {
++    return null;
++  }
++
+   if (!cached.promise) {
+     const opts: mongoose.ConnectOptions = {
+       bufferCommands: false,
+@@ -61,8 +73,9 @@ export async function connectMongo(): Promise<typeof mongoose | null> {
+   } catch (error) {
+     cached.promise = null;
+     cached.conn = null;
++    lastMongoFailureAt = Date.now();
+     console.error('❌ Failed to connect to MongoDB Atlas:', error);
+-    throw error;
++    return null;
+   }
+ 
+   return cached.conn;
+@@ -82,7 +95,8 @@ export async function seedMongoIfEmpty(): Promise<void> {
+   if (!isMongoConfigured()) return;
+ 
+   try {
+-    await connectMongo();
++    const conn = await connectMongo();
++    if (!conn) return; // Mongo unreachable — seeding is skipped, callers fall back
+     const gameCount = await GameModel.countDocuments();
+     if (gameCount > 0) {
+       return; // Already populated
+diff --git a/backend/src/repositories/gamesRepo.ts b/backend/src/repositories/gamesRepo.ts
+index afcfd24..75a9146 100644
+--- a/backend/src/repositories/gamesRepo.ts
++++ b/backend/src/repositories/gamesRepo.ts
+@@ -14,9 +14,14 @@ import { Game, CreateGameDto, UpdateGameDto } from '../types/index.js';
+ export const gamesRepo = {
+   async getAll(): Promise<Game[]> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const docs = await GameModel.find().sort({ created_at: -1 }).lean();
+-      return docs.map((d) => toEntity<Game>(d));
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const docs = await GameModel.find().sort({ created_at: -1 }).lean();
++        return docs.map((d) => toEntity<Game>(d));
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -31,9 +36,14 @@ export const gamesRepo = {
+ 
+   async getById(id: string): Promise<Game | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const doc = await GameModel.findById(id).lean();
+-      return doc ? toEntity<Game>(doc) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const doc = await GameModel.findById(id).lean();
++        return doc ? toEntity<Game>(doc) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -48,22 +58,27 @@ export const gamesRepo = {
+ 
+   async create(dto: CreateGameDto): Promise<Game> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const id = newId('game');
+-      const doc = await GameModel.create({
+-        _id: id,
+-        title: dto.title.trim(),
+-        genre: dto.genre.trim(),
+-        platform: dto.platform.trim(),
+-        description: dto.description.trim(),
+-        max_players_per_team: dto.max_players_per_team,
+-        release_year: dto.release_year,
+-        banner_color: dto.banner_color ?? '#8B7CF6',
+-        icon_theme: dto.icon_theme ?? 'gamepad',
+-        is_active: true,
+-        created_at: new Date().toISOString(),
+-      });
+-      return toEntity<Game>(doc);
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const id = newId('game');
++        const doc = await GameModel.create({
++          _id: id,
++          title: dto.title.trim(),
++          genre: dto.genre.trim(),
++          platform: dto.platform.trim(),
++          description: dto.description.trim(),
++          max_players_per_team: dto.max_players_per_team,
++          release_year: dto.release_year,
++          banner_color: dto.banner_color ?? '#8B7CF6',
++          icon_theme: dto.icon_theme ?? 'gamepad',
++          is_active: true,
++          created_at: new Date().toISOString(),
++        });
++        return toEntity<Game>(doc);
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -106,20 +121,25 @@ export const gamesRepo = {
+ 
+   async update(id: string, dto: UpdateGameDto): Promise<Game | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+-      if (dto.title !== undefined) patch.title = dto.title.trim();
+-      if (dto.genre !== undefined) patch.genre = dto.genre.trim();
+-      if (dto.platform !== undefined) patch.platform = dto.platform.trim();
+-      if (dto.description !== undefined) patch.description = dto.description.trim();
+-      if (dto.max_players_per_team !== undefined) patch.max_players_per_team = dto.max_players_per_team;
+-      if (dto.release_year !== undefined) patch.release_year = dto.release_year;
+-      if (dto.banner_color !== undefined) patch.banner_color = dto.banner_color;
+-      if (dto.icon_theme !== undefined) patch.icon_theme = dto.icon_theme;
+-      if (dto.is_active !== undefined) patch.is_active = dto.is_active;
+-
+-      const updated = await GameModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+-      return updated ? toEntity<Game>(updated) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
++        if (dto.title !== undefined) patch.title = dto.title.trim();
++        if (dto.genre !== undefined) patch.genre = dto.genre.trim();
++        if (dto.platform !== undefined) patch.platform = dto.platform.trim();
++        if (dto.description !== undefined) patch.description = dto.description.trim();
++        if (dto.max_players_per_team !== undefined) patch.max_players_per_team = dto.max_players_per_team;
++        if (dto.release_year !== undefined) patch.release_year = dto.release_year;
++        if (dto.banner_color !== undefined) patch.banner_color = dto.banner_color;
++        if (dto.icon_theme !== undefined) patch.icon_theme = dto.icon_theme;
++        if (dto.is_active !== undefined) patch.is_active = dto.is_active;
++
++        const updated = await GameModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
++        return updated ? toEntity<Game>(updated) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -161,9 +181,14 @@ export const gamesRepo = {
+ 
+   async delete(id: string): Promise<boolean> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const res = await GameModel.findByIdAndDelete(id);
+-      return !!res;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const res = await GameModel.findByIdAndDelete(id);
++        return !!res;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+diff --git a/backend/src/repositories/matchesRepo.ts b/backend/src/repositories/matchesRepo.ts
+index 02ae40a..0d994b6 100644
+--- a/backend/src/repositories/matchesRepo.ts
++++ b/backend/src/repositories/matchesRepo.ts
+@@ -14,10 +14,15 @@ import { Match, MatchStatus, CreateMatchDto, UpdateMatchDto, Tournament, Team }
+ export const matchesRepo = {
+   async getAll(tournamentId?: string): Promise<Match[]> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const filter = tournamentId ? { tournament_id: tournamentId } : {};
+-      const docs = await MatchModel.find(filter).sort({ scheduled_at: 1 }).lean();
+-      return Promise.all(docs.map((d) => enrichMatchMongo(d)));
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const filter = tournamentId ? { tournament_id: tournamentId } : {};
++        const docs = await MatchModel.find(filter).sort({ scheduled_at: 1 }).lean();
++        return Promise.all(docs.map((d) => enrichMatchMongo(d)));
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -39,9 +44,14 @@ export const matchesRepo = {
+ 
+   async getById(id: string): Promise<Match | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const doc = await MatchModel.findById(id).lean();
+-      return doc ? enrichMatchMongo(doc) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const doc = await MatchModel.findById(id).lean();
++        return doc ? enrichMatchMongo(doc) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -61,24 +71,29 @@ export const matchesRepo = {
+ 
+   async create(dto: CreateMatchDto): Promise<Match> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const id = newId('match');
+-      const doc = await MatchModel.create({
+-        _id: id,
+-        tournament_id: dto.tournament_id,
+-        team1_id: dto.team1_id,
+-        team2_id: dto.team2_id,
+-        round: dto.round || `Round ${dto.round_number ?? 1}`,
+-        round_number: dto.round_number ?? 1,
+-        scheduled_at: new Date(dto.scheduled_at).toISOString(),
+-        status: 'scheduled',
+-        team1_score: 0,
+-        team2_score: 0,
+-        winner_id: null,
+-        notes: dto.notes ?? '',
+-        created_at: new Date().toISOString(),
+-      });
+-      return enrichMatchMongo(doc);
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const id = newId('match');
++        const doc = await MatchModel.create({
++          _id: id,
++          tournament_id: dto.tournament_id,
++          team1_id: dto.team1_id,
++          team2_id: dto.team2_id,
++          round: dto.round || `Round ${dto.round_number ?? 1}`,
++          round_number: dto.round_number ?? 1,
++          scheduled_at: new Date(dto.scheduled_at).toISOString(),
++          status: 'scheduled',
++          team1_score: 0,
++          team2_score: 0,
++          winner_id: null,
++          notes: dto.notes ?? '',
++          created_at: new Date().toISOString(),
++        });
++        return enrichMatchMongo(doc);
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -122,32 +137,37 @@ export const matchesRepo = {
+ 
+   async update(id: string, dto: UpdateMatchDto): Promise<Match | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const curDoc = await MatchModel.findById(id).lean();
+-      if (!curDoc) return null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const curDoc = await MatchModel.findById(id).lean();
++        if (!curDoc) return null;
+ 
+-      let winnerId = dto.winner_id !== undefined ? dto.winner_id : curDoc.winner_id;
+-      const newStatus = dto.status ?? curDoc.status;
+-      const s1 = dto.team1_score !== undefined ? dto.team1_score : curDoc.team1_score;
+-      const s2 = dto.team2_score !== undefined ? dto.team2_score : curDoc.team2_score;
+-      if (newStatus === 'completed' && dto.winner_id === undefined) {
+-        if (s1 > s2) winnerId = curDoc.team1_id;
+-        else if (s2 > s1) winnerId = curDoc.team2_id;
+-        else winnerId = null;
+-      }
++        let winnerId = dto.winner_id !== undefined ? dto.winner_id : curDoc.winner_id;
++        const newStatus = dto.status ?? curDoc.status;
++        const s1 = dto.team1_score !== undefined ? dto.team1_score : curDoc.team1_score;
++        const s2 = dto.team2_score !== undefined ? dto.team2_score : curDoc.team2_score;
++        if (newStatus === 'completed' && dto.winner_id === undefined) {
++          if (s1 > s2) winnerId = curDoc.team1_id;
++          else if (s2 > s1) winnerId = curDoc.team2_id;
++          else winnerId = null;
++        }
+ 
+-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+-      if (dto.scheduled_at !== undefined) patch.scheduled_at = new Date(dto.scheduled_at).toISOString();
+-      if (dto.round !== undefined) patch.round = dto.round;
+-      if (dto.round_number !== undefined) patch.round_number = dto.round_number;
+-      if (dto.status !== undefined) patch.status = dto.status;
+-      if (dto.team1_score !== undefined) patch.team1_score = dto.team1_score;
+-      if (dto.team2_score !== undefined) patch.team2_score = dto.team2_score;
+-      if (dto.notes !== undefined) patch.notes = dto.notes;
+-      patch.winner_id = winnerId ?? null;
++        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
++        if (dto.scheduled_at !== undefined) patch.scheduled_at = new Date(dto.scheduled_at).toISOString();
++        if (dto.round !== undefined) patch.round = dto.round;
++        if (dto.round_number !== undefined) patch.round_number = dto.round_number;
++        if (dto.status !== undefined) patch.status = dto.status;
++        if (dto.team1_score !== undefined) patch.team1_score = dto.team1_score;
++        if (dto.team2_score !== undefined) patch.team2_score = dto.team2_score;
++        if (dto.notes !== undefined) patch.notes = dto.notes;
++        patch.winner_id = winnerId ?? null;
+ 
+-      const updated = await MatchModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+-      return updated ? enrichMatchMongo(updated) : null;
++        const updated = await MatchModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
++        return updated ? enrichMatchMongo(updated) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -201,9 +221,14 @@ export const matchesRepo = {
+ 
+   async delete(id: string): Promise<boolean> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const res = await MatchModel.findByIdAndDelete(id);
+-      return !!res;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const res = await MatchModel.findByIdAndDelete(id);
++        return !!res;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+diff --git a/backend/src/repositories/registrationsRepo.ts b/backend/src/repositories/registrationsRepo.ts
+index 6248ef1..5d0359a 100644
+--- a/backend/src/repositories/registrationsRepo.ts
++++ b/backend/src/repositories/registrationsRepo.ts
+@@ -14,10 +14,15 @@ import { Registration, RegistrationStatus, CreateRegistrationDto, Tournament, Te
+ export const registrationsRepo = {
+   async getAll(tournamentId?: string): Promise<Registration[]> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const filter = tournamentId ? { tournament_id: tournamentId } : {};
+-      const docs = await RegistrationModel.find(filter).sort({ registered_at: -1 }).lean();
+-      return Promise.all(docs.map((d) => enrichRegMongo(d)));
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const filter = tournamentId ? { tournament_id: tournamentId } : {};
++        const docs = await RegistrationModel.find(filter).sort({ registered_at: -1 }).lean();
++        return Promise.all(docs.map((d) => enrichRegMongo(d)));
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -36,9 +41,14 @@ export const registrationsRepo = {
+ 
+   async getById(id: string): Promise<Registration | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const doc = await RegistrationModel.findById(id).lean();
+-      return doc ? enrichRegMongo(doc) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const doc = await RegistrationModel.findById(id).lean();
++        return doc ? enrichRegMongo(doc) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -54,9 +64,14 @@ export const registrationsRepo = {
+ 
+   async findExisting(tournamentId: string, teamId: string): Promise<Registration | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const doc = await RegistrationModel.findOne({ tournament_id: tournamentId, team_id: teamId }).lean();
+-      return doc ? enrichRegMongo(doc) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const doc = await RegistrationModel.findOne({ tournament_id: tournamentId, team_id: teamId }).lean();
++        return doc ? enrichRegMongo(doc) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -76,8 +91,13 @@ export const registrationsRepo = {
+ 
+   async countConfirmed(tournamentId: string): Promise<number> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      return RegistrationModel.countDocuments({ tournament_id: tournamentId, status: 'confirmed' });
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        return RegistrationModel.countDocuments({ tournament_id: tournamentId, status: 'confirmed' });
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -96,17 +116,22 @@ export const registrationsRepo = {
+ 
+   async create(dto: CreateRegistrationDto, assignedStatus: RegistrationStatus, seedNumber: number): Promise<Registration> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const id = newId('reg');
+-      const doc = await RegistrationModel.create({
+-        _id: id,
+-        tournament_id: dto.tournament_id,
+-        team_id: dto.team_id,
+-        status: assignedStatus,
+-        registered_at: new Date().toISOString(),
+-        seed_number: seedNumber,
+-      });
+-      return enrichRegMongo(doc);
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const id = newId('reg');
++        const doc = await RegistrationModel.create({
++          _id: id,
++          tournament_id: dto.tournament_id,
++          team_id: dto.team_id,
++          status: assignedStatus,
++          registered_at: new Date().toISOString(),
++          seed_number: seedNumber,
++        });
++        return enrichRegMongo(doc);
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -138,13 +163,18 @@ export const registrationsRepo = {
+ 
+   async updateStatus(id: string, status: RegistrationStatus): Promise<Registration | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const updated = await RegistrationModel.findByIdAndUpdate(
+-        id,
+-        { $set: { status } },
+-        { new: true }
+-      ).lean();
+-      return updated ? enrichRegMongo(updated) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const updated = await RegistrationModel.findByIdAndUpdate(
++          id,
++          { $set: { status } },
++          { new: true }
++        ).lean();
++        return updated ? enrichRegMongo(updated) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -167,9 +197,14 @@ export const registrationsRepo = {
+ 
+   async delete(id: string): Promise<boolean> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const res = await RegistrationModel.findByIdAndDelete(id);
+-      return !!res;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const res = await RegistrationModel.findByIdAndDelete(id);
++        return !!res;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+diff --git a/backend/src/repositories/teamsRepo.ts b/backend/src/repositories/teamsRepo.ts
+index 76dd8d2..b4f2d0a 100644
+--- a/backend/src/repositories/teamsRepo.ts
++++ b/backend/src/repositories/teamsRepo.ts
+@@ -14,9 +14,14 @@ import { Team, CreateTeamDto, UpdateTeamDto } from '../types/index.js';
+ export const teamsRepo = {
+   async getAll(): Promise<Team[]> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const docs = await TeamModel.find().sort({ created_at: -1 }).lean();
+-      return docs.map((d) => toEntity<Team>(d));
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const docs = await TeamModel.find().sort({ created_at: -1 }).lean();
++        return docs.map((d) => toEntity<Team>(d));
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -31,9 +36,14 @@ export const teamsRepo = {
+ 
+   async getById(id: string): Promise<Team | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const doc = await TeamModel.findById(id).lean();
+-      return doc ? toEntity<Team>(doc) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const doc = await TeamModel.findById(id).lean();
++        return doc ? toEntity<Team>(doc) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -48,9 +58,14 @@ export const teamsRepo = {
+ 
+   async findByTag(tag: string): Promise<Team | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const doc = await TeamModel.findOne({ tag: tag.toUpperCase() }).lean();
+-      return doc ? toEntity<Team>(doc) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const doc = await TeamModel.findOne({ tag: tag.toUpperCase() }).lean();
++        return doc ? toEntity<Team>(doc) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -65,19 +80,24 @@ export const teamsRepo = {
+ 
+   async create(dto: CreateTeamDto): Promise<Team> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const id = newId('team');
+-      const doc = await TeamModel.create({
+-        _id: id,
+-        name: dto.name.trim(),
+-        tag: dto.tag.trim().toUpperCase(),
+-        captain_name: dto.captain_name.trim(),
+-        captain_email: dto.captain_email.trim().toLowerCase(),
+-        logo_color: dto.logo_color ?? '#8B7CF6',
+-        members_count: dto.members_count ?? 5,
+-        created_at: new Date().toISOString(),
+-      });
+-      return toEntity<Team>(doc);
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const id = newId('team');
++        const doc = await TeamModel.create({
++          _id: id,
++          name: dto.name.trim(),
++          tag: dto.tag.trim().toUpperCase(),
++          captain_name: dto.captain_name.trim(),
++          captain_email: dto.captain_email.trim().toLowerCase(),
++          logo_color: dto.logo_color ?? '#8B7CF6',
++          members_count: dto.members_count ?? 5,
++          created_at: new Date().toISOString(),
++        });
++        return toEntity<Team>(doc);
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -114,17 +134,22 @@ export const teamsRepo = {
+ 
+   async update(id: string, dto: UpdateTeamDto): Promise<Team | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+-      if (dto.name !== undefined) patch.name = dto.name.trim();
+-      if (dto.tag !== undefined) patch.tag = dto.tag.trim().toUpperCase();
+-      if (dto.captain_name !== undefined) patch.captain_name = dto.captain_name.trim();
+-      if (dto.captain_email !== undefined) patch.captain_email = dto.captain_email.trim().toLowerCase();
+-      if (dto.logo_color !== undefined) patch.logo_color = dto.logo_color;
+-      if (dto.members_count !== undefined) patch.members_count = dto.members_count;
+-
+-      const updated = await TeamModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+-      return updated ? toEntity<Team>(updated) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
++        if (dto.name !== undefined) patch.name = dto.name.trim();
++        if (dto.tag !== undefined) patch.tag = dto.tag.trim().toUpperCase();
++        if (dto.captain_name !== undefined) patch.captain_name = dto.captain_name.trim();
++        if (dto.captain_email !== undefined) patch.captain_email = dto.captain_email.trim().toLowerCase();
++        if (dto.logo_color !== undefined) patch.logo_color = dto.logo_color;
++        if (dto.members_count !== undefined) patch.members_count = dto.members_count;
++
++        const updated = await TeamModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
++        return updated ? toEntity<Team>(updated) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -160,9 +185,14 @@ export const teamsRepo = {
+ 
+   async delete(id: string): Promise<boolean> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const res = await TeamModel.findByIdAndDelete(id);
+-      return !!res;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const res = await TeamModel.findByIdAndDelete(id);
++        return !!res;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+diff --git a/backend/src/repositories/tournamentsRepo.ts b/backend/src/repositories/tournamentsRepo.ts
+index 08026e1..e935a02 100644
+--- a/backend/src/repositories/tournamentsRepo.ts
++++ b/backend/src/repositories/tournamentsRepo.ts
+@@ -27,9 +27,14 @@ import {
+ export const tournamentsRepo = {
+   async getAll(): Promise<Tournament[]> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const docs = await TournamentModel.find().sort({ created_at: -1 }).lean();
+-      return Promise.all(docs.map((d) => enrichTournamentMongo(d)));
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const docs = await TournamentModel.find().sort({ created_at: -1 }).lean();
++        return Promise.all(docs.map((d) => enrichTournamentMongo(d)));
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -47,9 +52,14 @@ export const tournamentsRepo = {
+ 
+   async getById(id: string): Promise<Tournament | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const doc = await TournamentModel.findById(id).lean();
+-      return doc ? enrichTournamentMongo(doc) : null;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const doc = await TournamentModel.findById(id).lean();
++        return doc ? enrichTournamentMongo(doc) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -69,23 +79,28 @@ export const tournamentsRepo = {
+ 
+   async create(dto: CreateTournamentDto): Promise<Tournament> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const id = newId('tourn');
+-      const doc = await TournamentModel.create({
+-        _id: id,
+-        title: dto.title.trim(),
+-        game_id: dto.game_id,
+-        format: dto.format,
+-        status: dto.status ?? 'registration_open',
+-        start_date: new Date(dto.start_date).toISOString(),
+-        end_date: new Date(dto.end_date).toISOString(),
+-        max_teams: dto.max_teams,
+-        prize_pool: dto.prize_pool,
+-        description: dto.description.trim(),
+-        rules: dto.rules?.trim() ?? '',
+-        created_at: new Date().toISOString(),
+-      });
+-      return enrichTournamentMongo(doc);
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const id = newId('tourn');
++        const doc = await TournamentModel.create({
++          _id: id,
++          title: dto.title.trim(),
++          game_id: dto.game_id,
++          format: dto.format,
++          status: dto.status ?? 'registration_open',
++          start_date: new Date(dto.start_date).toISOString(),
++          end_date: new Date(dto.end_date).toISOString(),
++          max_teams: dto.max_teams,
++          prize_pool: dto.prize_pool,
++          description: dto.description.trim(),
++          rules: dto.rules?.trim() ?? '',
++          created_at: new Date().toISOString(),
++        });
++        return enrichTournamentMongo(doc);
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -131,21 +146,26 @@ export const tournamentsRepo = {
+ 
+   async update(id: string, dto: UpdateTournamentDto): Promise<Tournament | null> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+-      if (dto.title !== undefined) patch.title = dto.title.trim();
+-      if (dto.game_id !== undefined) patch.game_id = dto.game_id;
+-      if (dto.format !== undefined) patch.format = dto.format;
+-      if (dto.status !== undefined) patch.status = dto.status;
+-      if (dto.start_date !== undefined) patch.start_date = new Date(dto.start_date).toISOString();
+-      if (dto.end_date !== undefined) patch.end_date = new Date(dto.end_date).toISOString();
+-      if (dto.max_teams !== undefined) patch.max_teams = dto.max_teams;
+-      if (dto.prize_pool !== undefined) patch.prize_pool = dto.prize_pool;
+-      if (dto.description !== undefined) patch.description = dto.description.trim();
+-      if (dto.rules !== undefined) patch.rules = dto.rules.trim();
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
++        if (dto.title !== undefined) patch.title = dto.title.trim();
++        if (dto.game_id !== undefined) patch.game_id = dto.game_id;
++        if (dto.format !== undefined) patch.format = dto.format;
++        if (dto.status !== undefined) patch.status = dto.status;
++        if (dto.start_date !== undefined) patch.start_date = new Date(dto.start_date).toISOString();
++        if (dto.end_date !== undefined) patch.end_date = new Date(dto.end_date).toISOString();
++        if (dto.max_teams !== undefined) patch.max_teams = dto.max_teams;
++        if (dto.prize_pool !== undefined) patch.prize_pool = dto.prize_pool;
++        if (dto.description !== undefined) patch.description = dto.description.trim();
++        if (dto.rules !== undefined) patch.rules = dto.rules.trim();
+ 
+-      const updated = await TournamentModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+-      return updated ? enrichTournamentMongo(updated) : null;
++        const updated = await TournamentModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
++        return updated ? enrichTournamentMongo(updated) : null;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+@@ -194,11 +214,16 @@ export const tournamentsRepo = {
+ 
+   async delete(id: string): Promise<boolean> {
+     if (isMongoConfigured()) {
+-      await connectMongo();
+-      const res = await TournamentModel.findByIdAndDelete(id);
+-      await RegistrationModel.deleteMany({ tournament_id: id });
+-      await MatchModel.deleteMany({ tournament_id: id });
+-      return !!res;
++      try {
++        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
++        const res = await TournamentModel.findByIdAndDelete(id);
++        await RegistrationModel.deleteMany({ tournament_id: id });
++        await MatchModel.deleteMany({ tournament_id: id });
++        return !!res;
++    
++      } catch (err) {
++        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
++      }
+     }
+ 
+     if (isSupabaseConfigured()) {
+diff --git a/backend/src/server.ts b/backend/src/server.ts
+index ccba1ea..d1f01fa 100644
+--- a/backend/src/server.ts
++++ b/backend/src/server.ts
+@@ -64,6 +64,7 @@ process.on('uncaughtException', (err) => {
+   process.exit(1);
+ });
+ process.on('unhandledRejection', (reason) => {
++  // Log, but do NOT exit: one failed request (e.g. a database timeout) must
++  // not kill the whole server for every other user.
+   console.error('Unhandled rejection:', reason);
+-  process.exit(1);
+ });
+diff --git a/backend/src/types/express-async-errors.d.ts b/backend/src/types/express-async-errors.d.ts
+new file mode 100644
+index 0000000..110f953
+--- /dev/null
++++ b/backend/src/types/express-async-errors.d.ts
+@@ -0,0 +1,4 @@
++// express-async-errors ships no TypeScript types. Importing it patches
++// Express 4 so rejected promises from async handlers/middleware are
++// forwarded to the error-handling middleware instead of hanging the request.
++declare module 'express-async-errors';
+diff --git a/backend/tests/mongo-failure.test.ts b/backend/tests/mongo-failure.test.ts
+new file mode 100644
+index 0000000..7ef26a9
+--- /dev/null
++++ b/backend/tests/mongo-failure.test.ts
+@@ -0,0 +1,70 @@
++/**
++ * Regression test for the live outage of 2026-10-27:
++ * MONGODB_URI was set but Atlas was unreachable, and every data endpoint
++ * hung forever (no response) instead of answering.
++ *
++ * With an unreachable MongoDB, data endpoints must still respond in bounded
++ * time — by falling back to the next data tier — and health must stay up.
++ *
++ * The env var is set BEFORE the app modules are imported (config is read at
++ * import time), using a dynamic import. Nothing is listening on 127.0.0.1:27099.
++ */
++
++import request from 'supertest';
++import type { Express } from 'express';
++
++process.env.MONGODB_URI = 'mongodb://127.0.0.1:27099/clusterhub-regression';
++
++let app: Express;
++
++beforeAll(async () => {
++  const m = await import('../src/app.js');
++  app = m.createApp();
++}, 30_000);
++
++afterAll(() => {
++  delete process.env.MONGODB_URI;
++});
++
++describe('Unreachable MongoDB (regression)', () => {
++  it('GET /api/health still returns 200', async () => {
++    const res = await request(app).get('/api/health');
++    expect(res.status).toBe(200);
++    expect(res.body.status).toBe('ok');
++  });
++
++  it(
++    'GET /api/games responds with fallback data instead of hanging',
++    async () => {
++      const start = Date.now();
++      const res = await request(app).get('/api/games');
++      const elapsed = Date.now() - start;
++      expect(res.status).toBe(200);
++      expect(Array.isArray(res.body)).toBe(true);
++      expect(res.body.length).toBeGreaterThan(0);
++      expect(elapsed).toBeLessThan(25_000);
++    },
++    30_000
++  );
++
++  it(
++    'GET /api/tournaments responds instead of hanging (fast after cooldown)',
++    async () => {
++      const start = Date.now();
++      const res = await request(app).get('/api/tournaments');
++      const elapsed = Date.now() - start;
++      expect(res.status).toBe(200);
++      expect(Array.isArray(res.body)).toBe(true);
++      // Second request must not pay another full connection timeout:
++      // the failure cooldown should make it (nearly) immediate.
++      expect(elapsed).toBeLessThan(10_000);
++    },
++    30_000
++  );
++
++  it('GET /api/leaderboard responds instead of hanging', async () => {
++    const res = await request(app).get('/api/leaderboard');
++    expect(res.status).toBe(200);
++    expect(Array.isArray(res.body)).toBe(true);
++  }, 30_000);
++});
+diff --git a/frontend/src/services/apiClient.ts b/frontend/src/services/apiClient.ts
+index 770d663..6d1e301 100644
+--- a/frontend/src/services/apiClient.ts
++++ b/frontend/src/services/apiClient.ts
+@@ -18,12 +18,15 @@ export class ApiError extends Error {
+   }
+ }
+ 
++/** Give up on a request after this long instead of loading forever. */
++export const API_TIMEOUT_MS = 12_000;
++
+ export async function request<T>(
+   endpoint: string,
+   options: RequestInit = {}
+ ): Promise<T> {
+   const token = localStorage.getItem('clusterhub_auth_token');
+-  
++
+   const headers = new Headers(options.headers || {});
+   headers.set('Content-Type', 'application/json');
+   if (token) {
+@@ -32,10 +35,21 @@ export async function request<T>(
+ 
+   const url = `${API_BASE_URL.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}`;
+ 
++  // Without a timeout, a backend that accepts the connection but never
++  // responds leaves fetch pending forever and the UI stuck on skeletons.
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
++  const callerSignal = options.signal;
++  if (callerSignal) {
++    if (callerSignal.aborted) controller.abort();
++    else callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
++  }
++
+   try {
+     const response = await fetch(url, {
+       ...options,
+       headers,
++      signal: controller.signal,
+     });
+ 
+     if (!response.ok) {
+@@ -61,10 +75,18 @@ export async function request<T>(
+     return await response.json();
+   } catch (err: any) {
+     if (err instanceof ApiError) throw err;
++    if (err?.name === 'AbortError') {
++      throw new ApiError(
++        `Request timed out after ${API_TIMEOUT_MS / 1000}s: the backend API did not respond.`,
++        0
++      );
++    }
+     throw new ApiError(
+       err.message || 'Network error: Unable to reach backend API',
+       0
+     );
++  } finally {
++    clearTimeout(timer);
+   }
+ }
+ 

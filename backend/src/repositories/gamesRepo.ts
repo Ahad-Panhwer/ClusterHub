@@ -14,9 +14,14 @@ import { Game, CreateGameDto, UpdateGameDto } from '../types/index.js';
 export const gamesRepo = {
   async getAll(): Promise<Game[]> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const docs = await GameModel.find().sort({ created_at: -1 }).lean();
-      return docs.map((d) => toEntity<Game>(d));
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const docs = await GameModel.find().sort({ created_at: -1 }).lean();
+        return docs.map((d) => toEntity<Game>(d));
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -31,9 +36,14 @@ export const gamesRepo = {
 
   async getById(id: string): Promise<Game | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const doc = await GameModel.findById(id).lean();
-      return doc ? toEntity<Game>(doc) : null;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const doc = await GameModel.findById(id).lean();
+        return doc ? toEntity<Game>(doc) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -48,22 +58,27 @@ export const gamesRepo = {
 
   async create(dto: CreateGameDto): Promise<Game> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const id = newId('game');
-      const doc = await GameModel.create({
-        _id: id,
-        title: dto.title.trim(),
-        genre: dto.genre.trim(),
-        platform: dto.platform.trim(),
-        description: dto.description.trim(),
-        max_players_per_team: dto.max_players_per_team,
-        release_year: dto.release_year,
-        banner_color: dto.banner_color ?? '#8B7CF6',
-        icon_theme: dto.icon_theme ?? 'gamepad',
-        is_active: true,
-        created_at: new Date().toISOString(),
-      });
-      return toEntity<Game>(doc);
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const id = newId('game');
+        const doc = await GameModel.create({
+          _id: id,
+          title: dto.title.trim(),
+          genre: dto.genre.trim(),
+          platform: dto.platform.trim(),
+          description: dto.description.trim(),
+          max_players_per_team: dto.max_players_per_team,
+          release_year: dto.release_year,
+          banner_color: dto.banner_color ?? '#8B7CF6',
+          icon_theme: dto.icon_theme ?? 'gamepad',
+          is_active: true,
+          created_at: new Date().toISOString(),
+        });
+        return toEntity<Game>(doc);
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -106,20 +121,25 @@ export const gamesRepo = {
 
   async update(id: string, dto: UpdateGameDto): Promise<Game | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (dto.title !== undefined) patch.title = dto.title.trim();
-      if (dto.genre !== undefined) patch.genre = dto.genre.trim();
-      if (dto.platform !== undefined) patch.platform = dto.platform.trim();
-      if (dto.description !== undefined) patch.description = dto.description.trim();
-      if (dto.max_players_per_team !== undefined) patch.max_players_per_team = dto.max_players_per_team;
-      if (dto.release_year !== undefined) patch.release_year = dto.release_year;
-      if (dto.banner_color !== undefined) patch.banner_color = dto.banner_color;
-      if (dto.icon_theme !== undefined) patch.icon_theme = dto.icon_theme;
-      if (dto.is_active !== undefined) patch.is_active = dto.is_active;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (dto.title !== undefined) patch.title = dto.title.trim();
+        if (dto.genre !== undefined) patch.genre = dto.genre.trim();
+        if (dto.platform !== undefined) patch.platform = dto.platform.trim();
+        if (dto.description !== undefined) patch.description = dto.description.trim();
+        if (dto.max_players_per_team !== undefined) patch.max_players_per_team = dto.max_players_per_team;
+        if (dto.release_year !== undefined) patch.release_year = dto.release_year;
+        if (dto.banner_color !== undefined) patch.banner_color = dto.banner_color;
+        if (dto.icon_theme !== undefined) patch.icon_theme = dto.icon_theme;
+        if (dto.is_active !== undefined) patch.is_active = dto.is_active;
 
-      const updated = await GameModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
-      return updated ? toEntity<Game>(updated) : null;
+        const updated = await GameModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+        return updated ? toEntity<Game>(updated) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -161,9 +181,14 @@ export const gamesRepo = {
 
   async delete(id: string): Promise<boolean> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const res = await GameModel.findByIdAndDelete(id);
-      return !!res;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const res = await GameModel.findByIdAndDelete(id);
+        return !!res;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {

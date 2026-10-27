@@ -14,9 +14,14 @@ import { Team, CreateTeamDto, UpdateTeamDto } from '../types/index.js';
 export const teamsRepo = {
   async getAll(): Promise<Team[]> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const docs = await TeamModel.find().sort({ created_at: -1 }).lean();
-      return docs.map((d) => toEntity<Team>(d));
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const docs = await TeamModel.find().sort({ created_at: -1 }).lean();
+        return docs.map((d) => toEntity<Team>(d));
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -31,9 +36,14 @@ export const teamsRepo = {
 
   async getById(id: string): Promise<Team | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const doc = await TeamModel.findById(id).lean();
-      return doc ? toEntity<Team>(doc) : null;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const doc = await TeamModel.findById(id).lean();
+        return doc ? toEntity<Team>(doc) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -48,9 +58,14 @@ export const teamsRepo = {
 
   async findByTag(tag: string): Promise<Team | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const doc = await TeamModel.findOne({ tag: tag.toUpperCase() }).lean();
-      return doc ? toEntity<Team>(doc) : null;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const doc = await TeamModel.findOne({ tag: tag.toUpperCase() }).lean();
+        return doc ? toEntity<Team>(doc) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -65,19 +80,24 @@ export const teamsRepo = {
 
   async create(dto: CreateTeamDto): Promise<Team> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const id = newId('team');
-      const doc = await TeamModel.create({
-        _id: id,
-        name: dto.name.trim(),
-        tag: dto.tag.trim().toUpperCase(),
-        captain_name: dto.captain_name.trim(),
-        captain_email: dto.captain_email.trim().toLowerCase(),
-        logo_color: dto.logo_color ?? '#8B7CF6',
-        members_count: dto.members_count ?? 5,
-        created_at: new Date().toISOString(),
-      });
-      return toEntity<Team>(doc);
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const id = newId('team');
+        const doc = await TeamModel.create({
+          _id: id,
+          name: dto.name.trim(),
+          tag: dto.tag.trim().toUpperCase(),
+          captain_name: dto.captain_name.trim(),
+          captain_email: dto.captain_email.trim().toLowerCase(),
+          logo_color: dto.logo_color ?? '#8B7CF6',
+          members_count: dto.members_count ?? 5,
+          created_at: new Date().toISOString(),
+        });
+        return toEntity<Team>(doc);
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -114,17 +134,22 @@ export const teamsRepo = {
 
   async update(id: string, dto: UpdateTeamDto): Promise<Team | null> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (dto.name !== undefined) patch.name = dto.name.trim();
-      if (dto.tag !== undefined) patch.tag = dto.tag.trim().toUpperCase();
-      if (dto.captain_name !== undefined) patch.captain_name = dto.captain_name.trim();
-      if (dto.captain_email !== undefined) patch.captain_email = dto.captain_email.trim().toLowerCase();
-      if (dto.logo_color !== undefined) patch.logo_color = dto.logo_color;
-      if (dto.members_count !== undefined) patch.members_count = dto.members_count;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (dto.name !== undefined) patch.name = dto.name.trim();
+        if (dto.tag !== undefined) patch.tag = dto.tag.trim().toUpperCase();
+        if (dto.captain_name !== undefined) patch.captain_name = dto.captain_name.trim();
+        if (dto.captain_email !== undefined) patch.captain_email = dto.captain_email.trim().toLowerCase();
+        if (dto.logo_color !== undefined) patch.logo_color = dto.logo_color;
+        if (dto.members_count !== undefined) patch.members_count = dto.members_count;
 
-      const updated = await TeamModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
-      return updated ? toEntity<Team>(updated) : null;
+        const updated = await TeamModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+        return updated ? toEntity<Team>(updated) : null;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
@@ -160,9 +185,14 @@ export const teamsRepo = {
 
   async delete(id: string): Promise<boolean> {
     if (isMongoConfigured()) {
-      await connectMongo();
-      const res = await TeamModel.findByIdAndDelete(id);
-      return !!res;
+      try {
+        if (!(await connectMongo())) throw new Error('MongoDB unavailable (connection failed)');
+        const res = await TeamModel.findByIdAndDelete(id);
+        return !!res;
+    
+      } catch (err) {
+        console.error('[Repo] MongoDB tier failed; falling back to next data tier:', err instanceof Error ? err.message : err);
+      }
     }
 
     if (isSupabaseConfigured()) {
