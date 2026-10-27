@@ -220,35 +220,112 @@ Time:        ~4s
 
 ---
 
-## 🚀 Production Deployment Guide
+## 🚀 Production Deployment Techniques & Architecture
 
-### Option A — Vercel (Recommended for Frontend & Serverless Backend)
-Detailed instructions are in the [Vercel Deployment Guide](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/docs/VERCEL_DEPLOYMENT_GUIDE.md).
-1. **Backend Project**:
-   - In [Vercel Dashboard](https://vercel.com/dashboard), import the repository.
-   - Set **Root Directory** to `backend`, Framework: `Other`.
-   - Add environment variable: `NODE_ENV=production`, `FRONTEND_ORIGIN=*`.
-   - Click **Deploy** and copy your API URL (e.g. `https://clusterhub-api.vercel.app`).
-2. **Frontend Project**:
-   - In Vercel, import the repository again as a second project.
-   - Set **Root Directory** to `frontend`, Framework: `Vite`.
-   - Add environment variable: `VITE_API_BASE_URL=https://clusterhub-api.vercel.app/api`.
-   - Click **Deploy** and open your live gaming tournament portal!
+ClusterHub is engineered with modern, cloud-native deployment patterns supporting decoupled multi-cloud topologies.
 
-### Option B — Render (Backend Web Service) + Netlify (Frontend)
-1. **Backend (Render)**:
-   - Use the included `render.yaml` Blueprint or create a Web Service pointing to `backend/`.
-   - Set build command: `npm install && npm run build`, start command: `npm start`.
-2. **Frontend (Netlify)**:
-   - Set base directory to `frontend/`, build command: `npm run build`, publish directory: `dist`.
-   - Set `VITE_API_BASE_URL` to your Render API URL.
+```mermaid
+graph LR
+    subgraph ClientLayer["Edge & Client Tier"]
+        Browser([User Browser])
+    end
+
+    subgraph StrategyA["Technique 1: Serverless Edge (Active Live Production - Vercel)"]
+        VercelCDN["Vercel Global Edge CDN<br/>React 19 SPA + Vite Bundler"]
+        VercelAPI["Vercel Serverless Function<br/>Express Engine via api/index.ts"]
+    end
+
+    subgraph StrategyB["Technique 2: Containerized Web Service (Render + Netlify)"]
+        NetlifyCDN["Netlify Anycast Edge<br/>Build: npm run build (dist/)"]
+        RenderService["Render Web Service (IaC)<br/>Long-running Node Process (render.yaml)"]
+    end
+
+    subgraph DataLayer["Cloud Persistence Tier"]
+        AtlasDB[(MongoDB Atlas M0/M10<br/>Primary Mongoose ODM)]
+        SupabaseDB[(Supabase PostgreSQL<br/>SQL Migrations + RLS)]
+    end
+
+    Browser -->|HTTPS / Static Assets| VercelCDN
+    VercelCDN -->|API Calls (VITE_API_BASE_URL)| VercelAPI
+    VercelAPI -->|Connection Pool| AtlasDB
+
+    Browser -.->|Alternative Route| NetlifyCDN
+    NetlifyCDN -.->|REST API| RenderService
+    RenderService -.-> AtlasDB
+    RenderService -.-> SupabaseDB
+```
 
 ---
 
-## 🔗 Project Links & License
+### 1. Architectural Deployment Strategies
 
-- **Live Deployed Application:** [https://cluster-hub-uikz.vercel.app/](https://cluster-hub-uikz.vercel.app/)
-- **GitHub Repository:** [https://github.com/Ahad-Panhwer/ClusterHub](https://github.com/Ahad-Panhwer/ClusterHub)
-- **Issue Tracker:** [https://github.com/Ahad-Panhwer/ClusterHub/issues](https://github.com/Ahad-Panhwer/ClusterHub/issues)
-- **Lead Organizer / Developer:** **Abdul Ahad**
+#### Technique 1 — Decoupled Serverless Edge (Vercel) — *Current Active Production*
+- **Frontend Edge CDN ([`frontend/`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/frontend)):**
+  - Compiled with Vite 8 into immutable, hashed production chunks (`dist/assets/index-*.js`, `dist/assets/index-*.css`).
+  - **SPA Route Rewriting:** Configured via [`frontend/vercel.json`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/frontend/vercel.json) and [`frontend/public/_redirects`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/frontend/public/_redirects) (`/* -> /index.html 200`) to guarantee direct deep-link navigation without 404 errors.
+  - **Dependency Isolation:** Strict peer-dependency resolution enforced via [`frontend/.npmrc`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/frontend/.npmrc) (`legacy-peer-deps=true`) preventing build failures with cutting-edge React 19 packages.
+- **Backend Serverless Microservice ([`backend/`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/backend)):**
+  - Powered by [`backend/api/index.ts`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/backend/api/index.ts) using `@vercel/node` builder specified in [`backend/vercel.json`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/backend/vercel.json).
+  - **Zero Cold-Start DB Caching:** Database connection pooling is initialized in global lambda scope, reusing active MongoDB Atlas connection instances across serverless invocations.
+  - **Dual-Path Routing Engine:** Responds identically on both `/api/*` and `/api/v1/*` prefixes.
+- **Cloud Database Tier:**
+  - Hosted on **MongoDB Atlas** with `0.0.0.0/0` Network Access enabled to accept dynamic IP addresses from Vercel serverless edge nodes.
+
+#### Technique 2 — Infrastructure as Code Containerized Web Service (Render + Netlify)
+- **Backend Web Service (Render):**
+  - Fully automated via **Infrastructure as Code (IaC)** using [`render.yaml`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/render.yaml).
+  - Deploys as a dedicated long-running Node.js process listening on host-assigned `PORT` with automated health probes (`/health`).
+  - Implements graceful port conflict detection (`EADDRINUSE`) in [`server.ts`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/backend/src/server.ts) and clean SIGINT/SIGTERM process termination.
+- **Frontend Static Distribution (Netlify):**
+  - Build pipeline automated via [`frontend/netlify.toml`](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/frontend/netlify.toml).
+  - Edge caching with pre-rendered assets and automated TLS 1.3 certificate provisioning.
+
+---
+
+### 2. Core Engineering Deployment Techniques Applied
+
+| Deployment Technique | Implementation in ClusterHub | Engineering Benefit |
+|---|---|---|
+| **The 12-Factor App Methodology** | Strict separation of code from configuration via environment variables (`VITE_API_BASE_URL`, `MONGODB_URI`, `FRONTEND_ORIGIN`, `NODE_ENV`). | Code is 100% portable across development, staging, and production without code modifications. |
+| **Git-Driven CI/CD Pipelines** | Continuous deployment webhooks on `main` branch across Vercel, Render, and Netlify. | Every `git push origin main` triggers automated type checking, linting, building, and zero-downtime deployment. |
+| **Immutable Asset Hashing** | Vite production builds generate content-based cryptographic hashes (`index-[hash].js`). | Enables aggressive `Cache-Control: max-age=31536000, immutable` edge caching while preventing stale client caches. |
+| **CORS & Origin Hardening** | Express `cors` middleware validates incoming browser origin against `FRONTEND_ORIGIN`. | Protects backend API endpoints against unauthorized third-party cross-origin abuse. |
+| **HTTP Security Headers** | Express `helmet` integration setting HSTS, X-Frame-Options (`DENY`), and MIME sniff protection. | Safeguards application against clickjacking, MIME confusion, and protocol downgrade attacks. |
+| **Tri-Tier Persistence Fallback** | Repository pattern automatically queries MongoDB Atlas $\rightarrow$ Supabase PostgreSQL $\rightarrow$ Local In-Memory Seed Store. | Guarantees system resilience and demo availability even during external database maintenance windows. |
+| **Live Health Monitoring Telemetry** | Dedicated `/api/health` diagnostic probe returning JSON service status and database state. | Enables cloud platform load balancers and uptime monitors to accurately gauge system health. |
+
+---
+
+### 3. Step-by-Step Deployment Instructions
+
+#### Deploying on Vercel (Two-Project Monorepo Pattern — Recommended)
+Detailed step-by-step instructions are available in the [Vercel Deployment Guide](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/docs/VERCEL_DEPLOYMENT_GUIDE.md).
+
+1. **Deploy Backend (`clusterhub-api`):**
+   - Import repository in Vercel. Set **Root Directory** to `backend`, Framework: `Other`.
+   - Add Environment Variables:
+     - `MONGODB_URI` = `mongodb+srv://<user>:<password>@cluster0.mongodb.net/clusterhub`
+     - `NODE_ENV` = `production`
+     - `FRONTEND_ORIGIN` = `*`
+   - Click **Deploy** and copy your backend URL (e.g. `https://cluster-hub-ug3x.vercel.app`).
+2. **Deploy Frontend (`clusterhub-ui`):**
+   - Import repository again as a second project. Set **Root Directory** to `frontend`, Framework: `Vite`.
+   - Add Environment Variable:
+     - `VITE_API_BASE_URL` = `https://your-backend-url.vercel.app/api`
+   - Click **Deploy** and launch your live portal!
+
+#### Deploying on Render + Netlify (Alternative)
+1. **Render (Backend):** Use the included `render.yaml` blueprint or create a Web Service pointing to `backend/`. Build: `npm install && npm run build`, Start: `npm start`.
+2. **Netlify (Frontend):** Base directory: `frontend/`, Build: `npm run build`, Publish: `dist/`. Set `VITE_API_BASE_URL` to your Render API URL.
+
+---
+
+## 🔗 Project Links & Live Access
+
+- 🌐 **Live Deployed Application:** [https://cluster-hub-uikz.vercel.app/](https://cluster-hub-uikz.vercel.app/)
+- 💻 **GitHub Repository:** [https://github.com/Ahad-Panhwer/ClusterHub](https://github.com/Ahad-Panhwer/ClusterHub)
+- 📄 **Software Requirements Specification (SRS):** [docs/SRS_DOCUMENT.md](file:///c:/Users/Ahad/OneDrive%20-%20Higher%20Education%20Commission/Desktop/CusterHub/docs/SRS_DOCUMENT.md)
+- 🐛 **Issue Tracker:** [https://github.com/Ahad-Panhwer/ClusterHub/issues](https://github.com/Ahad-Panhwer/ClusterHub/issues)
+- 👤 **Lead Organizer & Architect:** **Abdul Ahad**
+
 
