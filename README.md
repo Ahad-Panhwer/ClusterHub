@@ -99,6 +99,7 @@ ClusterHub/
 │       └── 0001_seed_demo_data.sql       # Initial seed fixtures
 │
 └── docs/                      # Project Specifications & Design Docs
+    ├── SRS_DOCUMENT.md        # Formal IEEE 830 / ISO 29148 Software Requirements Specification
     ├── API_CONTRACT.md        # REST API endpoints, status codes, and rules
     ├── ARCHITECTURE.md        # System design, data flow, security model
     ├── DATABASE_SCHEMA.md     # Relational schema reference and constraints
